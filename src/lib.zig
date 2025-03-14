@@ -536,43 +536,13 @@ test "pack string" {
     try std.testing.expect(std.mem.eql(u8, out[3][0..], expected[96..]));
 }
 
-fn nextPowOfTwo(len: usize) !usize {
-    if (len == 0) {
-        return @as(usize, 0);
-    }
-
-    // check that the msb isn't set and
-    // return an error if it is, as it
-    // would overflow.
-    if (@clz(len) == 0) {
-        return error.OverflowsUSize;
-    }
-
-    const n = std.math.log2(std.math.shl(usize, len, 1) - 1);
-    return std.math.powi(usize, 2, n);
-}
-
-test "next power of 2" {
-    var out = try nextPowOfTwo(0b1);
-    try std.testing.expect(out == 1);
-    out = try nextPowOfTwo(0b10);
-    try std.testing.expect(out == 2);
-    out = try nextPowOfTwo(0b11);
-    try std.testing.expect(out == 4);
-
-    // special cases
-    out = try nextPowOfTwo(0);
-    try std.testing.expect(out == 0);
-    try std.testing.expectError(error.OverflowsUSize, nextPowOfTwo(std.math.maxInt(usize)));
-}
-
 // merkleize recursively calculates the root hash of a Merkle tree.
 pub fn merkleize(hasher: type, chunks: []chunk, limit: ?usize, out: *[32]u8) anyerror!void {
     // Calculate the number of chunks to be padded, check the limit
     if (limit != null and chunks.len > limit.?) {
         return error.ChunkSizeExceedsLimit;
     }
-    const size = try nextPowOfTwo(limit orelse chunks.len);
+    const size = try std.math.ceilPowerOfTwo(usize, limit orelse chunks.len);
 
     // Perform the merkelization
     switch (size) {

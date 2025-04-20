@@ -408,6 +408,7 @@ test "deserializes an invalid Vector[N] payload" {
         @panic("missed error");
     } else |err| switch (err) {
         error.IndexOutOfBounds => {},
+        error.NoSerializedFixedSizeAvailable => {},
         // NOTE: this is to be uncommented if slices start using allocators
         // else => @panic(try std.fmt.allocPrint(std.testing.allocator, "wrong type of error found, err={any}", .{err})),
     }

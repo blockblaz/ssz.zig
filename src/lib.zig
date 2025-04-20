@@ -15,6 +15,29 @@ const BYTES_PER_CHUNK = 32;
 /// Number of bytes per serialized length offset.
 const BYTES_PER_LENGTH_OFFSET = 4;
 
+pub fn serializedFixedSize(comptime T: type) !usize {
+    const info = @typeInfo(T);
+    return switch (info) {
+        .int => @sizeOf(T),
+        .array => info.len * serializedFixedSize(info.array.child),
+        .pointer => switch (info.pointer.size) {
+            .slice => error.NoSerializedFixedSizeAvailable,
+            // or should we just throw error for all of pointer
+            else => serializedFixedSize(info.pointer.child),
+        },
+        .optional => error.NoSerializedSizeAvailable,
+        .null => @as(usize, 0),
+        .@"struct" => |str| size: {
+            var size: usize = 0;
+            inline for (str.fields) |field| {
+                size += try serializedFixedSize(field.type);
+            }
+            break :size size;
+        },
+        else => error.NoSerializedSizeAvailable,
+    };
+}
+
 // Determine the serialized size of an object so that
 // the code serializing of variable-size objects can
 // determine the offset to the next object.
@@ -22,9 +45,21 @@ pub fn serializedSize(comptime T: type, data: T) !usize {
     const info = @typeInfo(T);
     return switch (info) {
         .int => @sizeOf(T),
-        .array => data.len,
+        .array => size: {
+            var size: usize = 0;
+            for (0..data.len) |i| {
+                size += try serializedSize(info.array.child, data[i]);
+            }
+            break :size size;
+        },
         .pointer => switch (info.pointer.size) {
-            .slice => data.len,
+            .slice => size: {
+                var size: usize = 0;
+                for (0..data.len) |i| {
+                    size += try serializedSize(info.pointer.child, data[i]);
+                }
+                break :size size;
+            },
             else => serializedSize(info.pointer.child, data.*),
         },
         .optional => if (data == null)
@@ -369,7 +404,11 @@ pub fn deserialize(comptime T: type, serialized: []const u8, out: *T, allocator:
                 for (info.@"struct".fields) |field| {
                     switch (@typeInfo(field.type)) {
                         .int, .bool => {},
-                        else => n_var_fields += 1,
+                        else => {
+                            if (!try isFixedSizeObject(field.type)) {
+                                n_var_fields += 1;
+                            }
+                        },
                     }
                 }
             }
@@ -379,8 +418,8 @@ pub fn deserialize(comptime T: type, serialized: []const u8, out: *T, allocator:
             // First pass, read the value of each fixed-size field,
             // and write down the start offset of each variable-sized
             // field.
-            comptime var i = 0;
-            comptime var variable_field_index = 0;
+            var i: usize = 0;
+            var variable_field_index: usize = 0;
             inline for (info.@"struct".fields) |field| {
                 switch (@typeInfo(field.type)) {
                     .bool, .int => {
@@ -389,16 +428,23 @@ pub fn deserialize(comptime T: type, serialized: []const u8, out: *T, allocator:
                         i += @sizeOf(field.type);
                     },
                     else => {
-                        try deserialize(u32, serialized[i .. i + 4], &indices[variable_field_index], allocator);
-                        i += 4;
-                        variable_field_index += 1;
+                        if (try isFixedSizeObject(field.type)) {
+                            // Direct deserialize
+                            const field_serialized_size = try serializedFixedSize(field.type);
+                            try deserialize(field.type, serialized[i .. i + field_serialized_size], &@field(out.*, field.name), allocator);
+                            i += field_serialized_size;
+                        } else {
+                            try deserialize(u32, serialized[i .. i + 4], &indices[variable_field_index], allocator);
+                            i += 4;
+                            variable_field_index += 1;
+                        }
                     },
                 }
             }
 
             // Second pass, deserialize each variable-sized value
             // now that their offset is known.
-            comptime var last_index = 0;
+            var last_index: usize = 0;
             inline for (info.@"struct".fields) |field| {
                 // comptime fields are currently not supported, and it's not even
                 // certain that they can ever be without a change in the language.
@@ -406,7 +452,7 @@ pub fn deserialize(comptime T: type, serialized: []const u8, out: *T, allocator:
 
                 switch (@typeInfo(field.type)) {
                     .bool, .int => {}, // covered by the previous pass
-                    else => {
+                    else => if (!try isFixedSizeObject(field.type)) {
                         const end = if (last_index == indices.len - 1) serialized.len else indices[last_index + 1];
                         try deserialize(field.type, serialized[indices[last_index]..end], &@field(out.*, field.name), allocator);
                         last_index += 1;

@@ -413,7 +413,9 @@ pub fn deserialize(comptime T: type, serialized: []const u8, out: *T, allocator:
                 }
             }
 
-            var indices: [n_var_fields]u32 = undefined;
+            // 0 indices array causes compiletime error for places we access indices[]
+            // also use n_var_fields instead of indices.len
+            var indices: [n_var_fields + 1]u32 = undefined;
 
             // First pass, read the value of each fixed-size field,
             // and write down the start offset of each variable-sized
@@ -453,7 +455,7 @@ pub fn deserialize(comptime T: type, serialized: []const u8, out: *T, allocator:
                 switch (@typeInfo(field.type)) {
                     .bool, .int => {}, // covered by the previous pass
                     else => if (!try isFixedSizeObject(field.type)) {
-                        const end = if (last_index == indices.len - 1) serialized.len else indices[last_index + 1];
+                        const end = if (last_index == n_var_fields - 1) serialized.len else indices[last_index + 1];
                         try deserialize(field.type, serialized[indices[last_index]..end], &@field(out.*, field.name), allocator);
                         last_index += 1;
                     },

@@ -791,11 +791,14 @@ test "fixed/variable size arrays" {
     // verified on an equivalent nodejs container implementation
     const expected_serialized_fix_block = [_]u8{ 9, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 199, 128, 9, 253, 240, 127, 197, 106, 17, 241, 34, 55, 6, 88, 163, 83, 170, 165, 66, 237, 99, 228, 76, 75, 193, 95, 244, 205, 16, 90, 179, 60, 81, 12, 244, 147, 45, 160, 28, 192, 208, 78, 159, 151, 165, 43, 244, 44, 103, 197, 231, 128, 122, 15, 182, 90, 109, 10, 229, 68, 229, 60, 50, 231, 9, 0, 0, 0, 0, 0, 0, 0, 1, 2, 3, 4, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2 };
     try expect(std.mem.eql(u8, serialized_block.items, expected_serialized_fix_block[0..]));
-
-    std.debug.print("serialized fixed_signed_block ({d}) {any}", .{
+    std.debug.print("serialized fixed_signed_block ({d}) {any}\n", .{
         serialized_block.items.len,
         serialized_block.items,
     });
+
+    var deserialized_block: FixedSignedBlock = undefined;
+    try deserialize(FixedSignedBlock, serialized_block.items[0..], &deserialized_block, std.testing.allocator);
+    std.debug.print("deserialized_block {any}\n", .{deserialized_block});
 
     // test for nested variable structures
     const VarBlockBody = struct {

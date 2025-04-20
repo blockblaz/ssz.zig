@@ -19,7 +19,7 @@ pub fn serializedFixedSize(comptime T: type) !usize {
     const info = @typeInfo(T);
     return switch (info) {
         .int => @sizeOf(T),
-        .array => info.len * serializedFixedSize(info.array.child),
+        .array => info.array.len * try serializedFixedSize(info.array.child),
         .pointer => switch (info.pointer.size) {
             .slice => error.NoSerializedFixedSizeAvailable,
             // or should we just throw error for all of pointer
@@ -214,7 +214,7 @@ pub fn serialize(comptime T: type, data: T, l: *ArrayList(u8)) !void {
                 if (@typeInfo(field.type) == .int or @typeInfo(field.type) == .bool) {
                     var_start += @sizeOf(field.type);
                 } else if (try isFixedSizeObject(field.type)) {
-                    var_start += try serializedSize(field.type, @field(data, field.name));
+                    var_start += try serializedFixedSize(field.type);
                 } else {
                     var_start += 4;
                 }

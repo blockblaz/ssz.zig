@@ -4,6 +4,7 @@ const serialize = libssz.serialize;
 const deserialize = libssz.deserialize;
 const chunkCount = libssz.chunkCount;
 const hashTreeRoot = libssz.hashTreeRoot;
+const isFixedSizeObject = libssz.isFixedSizeObject;
 const std = @import("std");
 const ArrayList = std.ArrayList;
 const expect = std.testing.expect;
@@ -744,4 +745,52 @@ test "(de)serialization of Bitlist[N] when N % 8 != 0" {
     try deserialize(@TypeOf(bitlist), list.items, &bitlist_deser, null);
     try expect(bitlist.len() == bitlist_deser.len());
     try expect(bitlist.eql(&bitlist_deser));
+}
+
+test "fixed/variable size arrays" {
+    const Bytes32 = [32]u8;
+    var isFixedSizeType = try isFixedSizeObject(Bytes32);
+    try expect(isFixedSizeType == true);
+
+    const BytesVar = []u8;
+    isFixedSizeType = try isFixedSizeObject(BytesVar);
+    try expect(isFixedSizeType == false);
+
+    // test for nested but fixed structures
+    const FixedBlockBody = struct {
+        slot: u64,
+        data: [4]u8,
+    };
+    const FixedBlock = struct {
+        slot: u64,
+        proposer_index: u64,
+        parent_root: Bytes32,
+        state_root: Bytes32,
+        body: FixedBlockBody,
+    };
+    const FixedBeamBlock = struct {
+        message: FixedBlock,
+        signature: [48]u8,
+    };
+    isFixedSizeType = try isFixedSizeObject(FixedBeamBlock);
+    try expect(isFixedSizeType == true);
+
+    // test for nested variable structures
+    const VarBlockBody = struct {
+        slot: u64,
+        data: []u8,
+    };
+    const VarBlock = struct {
+        slot: u64,
+        proposer_index: u64,
+        parent_root: Bytes32,
+        state_root: Bytes32,
+        body: VarBlockBody,
+    };
+    const VarBeamBlock = struct {
+        message: VarBlock,
+        signature: [48]u8,
+    };
+    isFixedSizeType = try isFixedSizeObject(VarBeamBlock);
+    try expect(isFixedSizeType == false);
 }

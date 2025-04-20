@@ -48,7 +48,7 @@ pub fn isFixedSizeObject(comptime T: type) !bool {
     const info = @typeInfo(T);
     switch (info) {
         .bool, .int, .null => return true,
-        .array => return false,
+        .array => return isFixedSizeObject(info.array.child),
         .@"struct" => |str| inline for (str.fields) |field| {
             if (!try isFixedSizeObject(field.type)) {
                 return false;

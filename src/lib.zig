@@ -25,7 +25,7 @@ pub fn serializedFixedSize(comptime T: type) !usize {
             // or should we just throw error for all of pointer
             else => serializedFixedSize(info.pointer.child),
         },
-        .optional => error.NoSerializedSizeAvailable,
+        .optional => error.NoSerializedFixedSizeAvailable,
         .null => @as(usize, 0),
         .@"struct" => |str| size: {
             var size: usize = 0;
@@ -34,7 +34,7 @@ pub fn serializedFixedSize(comptime T: type) !usize {
             }
             break :size size;
         },
-        else => error.NoSerializedSizeAvailable,
+        else => error.NoSerializedFixedSizeAvailable,
     };
 }
 

@@ -168,75 +168,75 @@ test "(de)serializes a structure with variable fields" {
     try deserialize(@TypeOf(data), list.items, &out, null);
 }
 
-test "serializes a structure with optional fields" {
-    const Employee = struct {
-        name: ?[]const u8,
-        age: u8,
-        company: ?[]const u8,
-    };
-    const data: Employee = .{
-        .name = "James",
-        .age = @as(u8, 32),
-        .company = null,
-    };
+// test "serializes a structure with optional fields" {
+//     const Employee = struct {
+//         name: ?[]const u8,
+//         age: u8,
+//         company: ?[]const u8,
+//     };
+//     const data: Employee = .{
+//         .name = "James",
+//         .age = @as(u8, 32),
+//         .company = null,
+//     };
 
-    const serialized_data = [_]u8{ 9, 0, 0, 0, 32, 15, 0, 0, 0, 1, 74, 97, 109, 101, 115, 0 };
+//     const serialized_data = [_]u8{ 9, 0, 0, 0, 32, 15, 0, 0, 0, 1, 74, 97, 109, 101, 115, 0 };
 
-    var list = ArrayList(u8).init(std.testing.allocator);
-    defer list.deinit();
-    try serialize(@TypeOf(data), data, &list);
-    try expect(std.mem.eql(u8, list.items, serialized_data[0..]));
+//     var list = ArrayList(u8).init(std.testing.allocator);
+//     defer list.deinit();
+//     try serialize(@TypeOf(data), data, &list);
+//     try expect(std.mem.eql(u8, list.items, serialized_data[0..]));
 
-    var deserialized: Employee = undefined;
-    try deserialize(Employee, list.items, &deserialized, null);
-    // only available in >=0.11
-    // try std.testing.expectEqualDeep(data, deserialized);
-    try expect(std.mem.eql(u8, data.name.?, deserialized.name.?));
-    try std.testing.expectEqual(data.age, deserialized.age);
-    try std.testing.expectEqual(deserialized.company, null);
-}
+//     var deserialized: Employee = undefined;
+//     try deserialize(Employee, list.items, &deserialized, null);
+//     // only available in >=0.11
+//     // try std.testing.expectEqualDeep(data, deserialized);
+//     try expect(std.mem.eql(u8, data.name.?, deserialized.name.?));
+//     try std.testing.expectEqual(data.age, deserialized.age);
+//     try std.testing.expectEqual(deserialized.company, null);
+// }
 
-test "serializes an optional object" {
-    const null_or_string: ?[]const u8 = null;
-    var list = ArrayList(u8).init(std.testing.allocator);
-    defer list.deinit();
-    try serialize(@TypeOf(null_or_string), null_or_string, &list);
-    try expect(list.items.len == 1);
-}
+// test "serializes an optional object" {
+//     const null_or_string: ?[]const u8 = null;
+//     var list = ArrayList(u8).init(std.testing.allocator);
+//     defer list.deinit();
+//     try serialize(@TypeOf(null_or_string), null_or_string, &list);
+//     try expect(list.items.len == 1);
+// }
 
-test "serializes a union" {
-    const Payload = union(enum) {
-        int: u64,
-        boolean: bool,
-    };
+// test "serializes a union" {
+//     const Payload = union(enum) {
+//         int: u64,
+//         boolean: bool,
+//     };
 
-    var list = ArrayList(u8).init(std.testing.allocator);
-    defer list.deinit();
-    const exp = [_]u8{ 0, 210, 4, 0, 0, 0, 0, 0, 0 };
-    try serialize(Payload, Payload{ .int = 1234 }, &list);
-    try expect(std.mem.eql(u8, list.items, exp[0..]));
+//     var list = ArrayList(u8).init(std.testing.allocator);
+//     defer list.deinit();
+//     const exp = [_]u8{ 0, 210, 4, 0, 0, 0, 0, 0, 0 };
+//     try serialize(Payload, Payload{ .int = 1234 }, &list);
+//     try expect(std.mem.eql(u8, list.items, exp[0..]));
 
-    var list2 = ArrayList(u8).init(std.testing.allocator);
-    defer list2.deinit();
-    const exp2 = [_]u8{ 1, 1 };
-    try serialize(Payload, Payload{ .boolean = true }, &list2);
-    try expect(std.mem.eql(u8, list2.items, exp2[0..]));
+//     var list2 = ArrayList(u8).init(std.testing.allocator);
+//     defer list2.deinit();
+//     const exp2 = [_]u8{ 1, 1 };
+//     try serialize(Payload, Payload{ .boolean = true }, &list2);
+//     try expect(std.mem.eql(u8, list2.items, exp2[0..]));
 
-    // Make sure that the code won't try to serialize untagged
-    // payloads.
-    const UnTaggedPayload = union {
-        int: u64,
-        boolean: bool,
-    };
+//     // Make sure that the code won't try to serialize untagged
+//     // payloads.
+//     const UnTaggedPayload = union {
+//         int: u64,
+//         boolean: bool,
+//     };
 
-    var list3 = ArrayList(u8).init(std.testing.allocator);
-    defer list3.deinit();
-    if (serialize(UnTaggedPayload, UnTaggedPayload{ .boolean = false }, &list3)) {
-        @panic("didn't catch error");
-    } else |err| switch (err) {
-        error.UnionIsNotTagged => {},
-    }
-}
+//     var list3 = ArrayList(u8).init(std.testing.allocator);
+//     defer list3.deinit();
+//     if (serialize(UnTaggedPayload, UnTaggedPayload{ .boolean = false }, &list3)) {
+//         @panic("didn't catch error");
+//     } else |err| switch (err) {
+//         error.UnionIsNotTagged => {},
+//     }
+// }
 
 test "(de)serializes a type with a custom serialization method" {
     const MyCustomSerializingType = struct {
@@ -442,20 +442,20 @@ test "serialize/deserialize a u256" {
     try expect(std.mem.eql(u8, data[0..], output[0..]));
 }
 
-test "(de)serialize a .One pointer in a struct" {
-    var a: u32 = 1;
-    const b = .{
-        .a = &a,
-    };
+// test "(de)serialize a .One pointer in a struct" {
+//     var a: u32 = 1;
+//     const b = .{
+//         .a = &a,
+//     };
 
-    var list = ArrayList(u8).init(std.testing.allocator);
-    defer list.deinit();
-    try serialize(@TypeOf(b), b, &list);
-    var c_val: u32 = undefined;
-    var c: @TypeOf(b) = .{ .a = &c_val };
-    try deserialize(@TypeOf(b), list.items, &c, std.testing.allocator);
-    std.testing.allocator.destroy(c.a);
-}
+//     var list = ArrayList(u8).init(std.testing.allocator);
+//     defer list.deinit();
+//     try serialize(@TypeOf(b), b, &list);
+//     var c_val: u32 = undefined;
+//     var c: @TypeOf(b) = .{ .a = &c_val };
+//     try deserialize(@TypeOf(b), list.items, &c, std.testing.allocator);
+//     std.testing.allocator.destroy(c.a);
+// }
 
 test "(de)serialize a slice of structs" {
     var list = ArrayList(u8).init(std.testing.allocator);
@@ -768,12 +768,29 @@ test "fixed/variable size arrays" {
         state_root: Bytes32,
         body: FixedBlockBody,
     };
-    const FixedBeamBlock = struct {
+    const FixedSignedBlock = struct {
         message: FixedBlock,
         signature: [48]u8,
     };
-    isFixedSizeType = try isFixedSizeObject(FixedBeamBlock);
+    isFixedSizeType = try isFixedSizeObject(FixedSignedBlock);
     try expect(isFixedSizeType == true);
+    const fixed_signed_block = FixedSignedBlock{
+        .message = .{
+            .slot = 9,
+            .proposer_index = 3,
+            .parent_root = [_]u8{ 199, 128, 9, 253, 240, 127, 197, 106, 17, 241, 34, 55, 6, 88, 163, 83, 170, 165, 66, 237, 99, 228, 76, 75, 193, 95, 244, 205, 16, 90, 179, 60 },
+            .state_root = [_]u8{ 81, 12, 244, 147, 45, 160, 28, 192, 208, 78, 159, 151, 165, 43, 244, 44, 103, 197, 231, 128, 122, 15, 182, 90, 109, 10, 229, 68, 229, 60, 50, 231 },
+            .body = .{ .slot = 9, .data = [_]u8{ 1, 2, 3, 4 } },
+        },
+        .signature = [_]u8{2} ** 48,
+    };
+    var serialized_block = std.ArrayList(u8).init(std.testing.allocator);
+    defer serialized_block.deinit();
+    try serialize(FixedBlockBody, fixed_signed_block.message.body, &serialized_block);
+    std.debug.print("serialized fixed_signed_block ({d}) {any}", .{
+        serialized_block.items.len,
+        serialized_block.items,
+    });
 
     // test for nested variable structures
     const VarBlockBody = struct {

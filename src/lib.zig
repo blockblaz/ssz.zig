@@ -174,10 +174,12 @@ pub fn serialize(comptime T: type, data: T, l: *ArrayList(u8)) !void {
         },
         .@"struct" => {
             // First pass, accumulate the fixed sizes
-            comptime var var_start = 0;
+            var var_start: usize = 0;
             inline for (info.@"struct".fields) |field| {
                 if (@typeInfo(field.type) == .int or @typeInfo(field.type) == .bool) {
                     var_start += @sizeOf(field.type);
+                } else if (try isFixedSizeObject(field.type)) {
+                    var_start += try serializedSize(field.type, @field(data, field.name));
                 } else {
                     var_start += 4;
                 }
@@ -191,8 +193,12 @@ pub fn serialize(comptime T: type, data: T, l: *ArrayList(u8)) !void {
                         try serialize(field.type, @field(data, field.name), l);
                     },
                     else => {
-                        try serialize(u32, @truncate(var_acc), l);
-                        var_acc += try serializedSize(field.type, @field(data, field.name));
+                        if (try isFixedSizeObject(field.type)) {
+                            try serialize(field.type, @field(data, field.name), l);
+                        } else {
+                            try serialize(u32, @truncate(var_acc), l);
+                            var_acc += try serializedSize(field.type, @field(data, field.name));
+                        }
                     },
                 }
             }
@@ -205,7 +211,9 @@ pub fn serialize(comptime T: type, data: T, l: *ArrayList(u8)) !void {
                             // skip fixed-size fields
                         },
                         else => {
-                            try serialize(field.type, @field(data, field.name), l);
+                            if (!try isFixedSizeObject(field.type)) {
+                                try serialize(field.type, @field(data, field.name), l);
+                            }
                         },
                     }
                 }

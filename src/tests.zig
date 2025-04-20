@@ -786,7 +786,11 @@ test "fixed/variable size arrays" {
     };
     var serialized_block = std.ArrayList(u8).init(std.testing.allocator);
     defer serialized_block.deinit();
-    try serialize(FixedBlockBody, fixed_signed_block.message.body, &serialized_block);
+    try serialize(FixedSignedBlock, fixed_signed_block, &serialized_block);
+    // verified on an equivalent nodejs container implementation
+    const expected_serialized_fix_block = [_]u8{ 9, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 199, 128, 9, 253, 240, 127, 197, 106, 17, 241, 34, 55, 6, 88, 163, 83, 170, 165, 66, 237, 99, 228, 76, 75, 193, 95, 244, 205, 16, 90, 179, 60, 81, 12, 244, 147, 45, 160, 28, 192, 208, 78, 159, 151, 165, 43, 244, 44, 103, 197, 231, 128, 122, 15, 182, 90, 109, 10, 229, 68, 229, 60, 50, 231, 9, 0, 0, 0, 0, 0, 0, 0, 1, 2, 3, 4, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2 };
+    try expect(std.mem.eql(u8, serialized_block.items, expected_serialized_fix_block[0..]));
+
     std.debug.print("serialized fixed_signed_block ({d}) {any}", .{
         serialized_block.items.len,
         serialized_block.items,

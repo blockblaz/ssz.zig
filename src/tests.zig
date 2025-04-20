@@ -770,7 +770,6 @@ test "fixed/variable size arrays" {
     };
     const FixedBeamBlock = struct {
         message: FixedBlock,
-        // winternitz signature might be of different size depending on num chunks and chunk size
         signature: [48]u8,
     };
     isFixedSizeType = try isFixedSizeObject(FixedBeamBlock);
@@ -790,7 +789,6 @@ test "fixed/variable size arrays" {
     };
     const VarBeamBlock = struct {
         message: VarBlock,
-        // winternitz signature might be of different size depending on num chunks and chunk size
         signature: [48]u8,
     };
     isFixedSizeType = try isFixedSizeObject(VarBeamBlock);

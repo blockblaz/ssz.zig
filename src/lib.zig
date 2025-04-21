@@ -447,7 +447,7 @@ pub fn deserialize(comptime T: type, serialized: []const u8, out: *T, allocator:
 
             // Second pass, deserialize each variable-sized value
             // now that their offset is known.
-            var last_index: usize = 0;
+            comptime var last_index = 0;
             inline for (info.@"struct".fields) |field| {
                 // comptime fields are currently not supported, and it's not even
                 // certain that they can ever be without a change in the language.
@@ -455,7 +455,7 @@ pub fn deserialize(comptime T: type, serialized: []const u8, out: *T, allocator:
 
                 switch (@typeInfo(field.type)) {
                     .bool, .int => {}, // covered by the previous pass
-                    else => if (!try isFixedSizeObject(field.type)) {
+                    else => if (!try comptime isFixedSizeObject(field.type)) {
                         const end = if (last_index == n_var_fields - 1) serialized.len else indices[last_index + 1];
                         try deserialize(field.type, serialized[indices[last_index]..end], &@field(out.*, field.name), allocator);
                         last_index += 1;

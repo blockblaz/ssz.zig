@@ -310,7 +310,7 @@ pub fn deserialize(comptime T: type, serialized: []const u8, out: *T, allocator:
                 const U = info.array.child;
                 if (try isFixedSizeObject(U)) {
                     comptime var i = 0;
-                    const pitch = @sizeOf(U);
+                    const pitch = try comptime serializedFixedSize(U);
                     inline while (i < out.len) : (i += pitch) {
                         try deserialize(U, serialized[i * pitch .. (i + 1) * pitch], &out[i], allocator);
                     }

@@ -168,33 +168,33 @@ test "(de)serializes a structure with variable fields" {
     try deserialize(@TypeOf(data), list.items, &out, null);
 }
 
-// test "serializes a structure with optional fields" {
-//     const Employee = struct {
-//         name: ?[]const u8,
-//         age: u8,
-//         company: ?[]const u8,
-//     };
-//     const data: Employee = .{
-//         .name = "James",
-//         .age = @as(u8, 32),
-//         .company = null,
-//     };
+test "serializes a structure with optional fields" {
+    const Employee = struct {
+        name: ?[]const u8,
+        age: u8,
+        company: ?[]const u8,
+    };
+    const data: Employee = .{
+        .name = "James",
+        .age = @as(u8, 32),
+        .company = null,
+    };
 
-//     const serialized_data = [_]u8{ 9, 0, 0, 0, 32, 15, 0, 0, 0, 1, 74, 97, 109, 101, 115, 0 };
+    const serialized_data = [_]u8{ 9, 0, 0, 0, 32, 15, 0, 0, 0, 1, 74, 97, 109, 101, 115, 0 };
 
-//     var list = ArrayList(u8).init(std.testing.allocator);
-//     defer list.deinit();
-//     try serialize(@TypeOf(data), data, &list);
-//     try expect(std.mem.eql(u8, list.items, serialized_data[0..]));
+    var list = ArrayList(u8).init(std.testing.allocator);
+    defer list.deinit();
+    try serialize(@TypeOf(data), data, &list);
+    try expect(std.mem.eql(u8, list.items, serialized_data[0..]));
 
-//     var deserialized: Employee = undefined;
-//     try deserialize(Employee, list.items, &deserialized, null);
-//     // only available in >=0.11
-//     // try std.testing.expectEqualDeep(data, deserialized);
-//     try expect(std.mem.eql(u8, data.name.?, deserialized.name.?));
-//     try std.testing.expectEqual(data.age, deserialized.age);
-//     try std.testing.expectEqual(deserialized.company, null);
-// }
+    var deserialized: Employee = undefined;
+    try deserialize(Employee, list.items, &deserialized, null);
+    // only available in >=0.11
+    // try std.testing.expectEqualDeep(data, deserialized);
+    try expect(std.mem.eql(u8, data.name.?, deserialized.name.?));
+    try std.testing.expectEqual(data.age, deserialized.age);
+    try std.testing.expectEqual(deserialized.company, null);
+}
 
 test "serializes an optional object" {
     const null_or_string: ?[]const u8 = null;

@@ -89,6 +89,7 @@ pub fn isFixedSizeObject(comptime T: type) !bool {
                 return false;
             }
         },
+        .optional => return false,
         .pointer => |ptr| switch (ptr.size) {
             .many, .slice, .c => return false,
             .one => return isFixedSizeObject(info.pointer.child),

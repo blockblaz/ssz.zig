@@ -748,7 +748,7 @@ test "(de)serialization of Bitlist[N] when N % 8 != 0" {
     try expect(bitlist.eql(&bitlist_deser));
 }
 
-test "fixed/variable size arrays" {
+test "structs with nested fixed/variable size u8 array" {
     const Bytes32 = [32]u8;
     var isFixedSizeType = try isFixedSizeObject(Bytes32);
     try expect(isFixedSizeType == true);

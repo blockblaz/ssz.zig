@@ -196,47 +196,47 @@ test "(de)serializes a structure with variable fields" {
 //     try std.testing.expectEqual(deserialized.company, null);
 // }
 
-// test "serializes an optional object" {
-//     const null_or_string: ?[]const u8 = null;
-//     var list = ArrayList(u8).init(std.testing.allocator);
-//     defer list.deinit();
-//     try serialize(@TypeOf(null_or_string), null_or_string, &list);
-//     try expect(list.items.len == 1);
-// }
+test "serializes an optional object" {
+    const null_or_string: ?[]const u8 = null;
+    var list = ArrayList(u8).init(std.testing.allocator);
+    defer list.deinit();
+    try serialize(@TypeOf(null_or_string), null_or_string, &list);
+    try expect(list.items.len == 1);
+}
 
-// test "serializes a union" {
-//     const Payload = union(enum) {
-//         int: u64,
-//         boolean: bool,
-//     };
+test "serializes a union" {
+    const Payload = union(enum) {
+        int: u64,
+        boolean: bool,
+    };
 
-//     var list = ArrayList(u8).init(std.testing.allocator);
-//     defer list.deinit();
-//     const exp = [_]u8{ 0, 210, 4, 0, 0, 0, 0, 0, 0 };
-//     try serialize(Payload, Payload{ .int = 1234 }, &list);
-//     try expect(std.mem.eql(u8, list.items, exp[0..]));
+    var list = ArrayList(u8).init(std.testing.allocator);
+    defer list.deinit();
+    const exp = [_]u8{ 0, 210, 4, 0, 0, 0, 0, 0, 0 };
+    try serialize(Payload, Payload{ .int = 1234 }, &list);
+    try expect(std.mem.eql(u8, list.items, exp[0..]));
 
-//     var list2 = ArrayList(u8).init(std.testing.allocator);
-//     defer list2.deinit();
-//     const exp2 = [_]u8{ 1, 1 };
-//     try serialize(Payload, Payload{ .boolean = true }, &list2);
-//     try expect(std.mem.eql(u8, list2.items, exp2[0..]));
+    var list2 = ArrayList(u8).init(std.testing.allocator);
+    defer list2.deinit();
+    const exp2 = [_]u8{ 1, 1 };
+    try serialize(Payload, Payload{ .boolean = true }, &list2);
+    try expect(std.mem.eql(u8, list2.items, exp2[0..]));
 
-//     // Make sure that the code won't try to serialize untagged
-//     // payloads.
-//     const UnTaggedPayload = union {
-//         int: u64,
-//         boolean: bool,
-//     };
+    // Make sure that the code won't try to serialize untagged
+    // payloads.
+    const UnTaggedPayload = union {
+        int: u64,
+        boolean: bool,
+    };
 
-//     var list3 = ArrayList(u8).init(std.testing.allocator);
-//     defer list3.deinit();
-//     if (serialize(UnTaggedPayload, UnTaggedPayload{ .boolean = false }, &list3)) {
-//         @panic("didn't catch error");
-//     } else |err| switch (err) {
-//         error.UnionIsNotTagged => {},
-//     }
-// }
+    var list3 = ArrayList(u8).init(std.testing.allocator);
+    defer list3.deinit();
+    if (serialize(UnTaggedPayload, UnTaggedPayload{ .boolean = false }, &list3)) {
+        @panic("didn't catch error");
+    } else |err| switch (err) {
+        error.UnionIsNotTagged => {},
+    }
+}
 
 test "(de)serializes a type with a custom serialization method" {
     const MyCustomSerializingType = struct {
@@ -443,20 +443,20 @@ test "serialize/deserialize a u256" {
     try expect(std.mem.eql(u8, data[0..], output[0..]));
 }
 
-// test "(de)serialize a .One pointer in a struct" {
-//     var a: u32 = 1;
-//     const b = .{
-//         .a = &a,
-//     };
+test "(de)serialize a .One pointer in a struct" {
+    var a: u32 = 1;
+    const b = .{
+        .a = &a,
+    };
 
-//     var list = ArrayList(u8).init(std.testing.allocator);
-//     defer list.deinit();
-//     try serialize(@TypeOf(b), b, &list);
-//     var c_val: u32 = undefined;
-//     var c: @TypeOf(b) = .{ .a = &c_val };
-//     try deserialize(@TypeOf(b), list.items, &c, std.testing.allocator);
-//     std.testing.allocator.destroy(c.a);
-// }
+    var list = ArrayList(u8).init(std.testing.allocator);
+    defer list.deinit();
+    try serialize(@TypeOf(b), b, &list);
+    var c_val: u32 = undefined;
+    var c: @TypeOf(b) = .{ .a = &c_val };
+    try deserialize(@TypeOf(b), list.items, &c, std.testing.allocator);
+    std.testing.allocator.destroy(c.a);
+}
 
 test "(de)serialize a slice of structs" {
     var list = ArrayList(u8).init(std.testing.allocator);

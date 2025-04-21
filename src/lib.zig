@@ -209,12 +209,12 @@ pub fn serialize(comptime T: type, data: T, l: *ArrayList(u8)) !void {
         },
         .@"struct" => {
             // First pass, accumulate the fixed sizes
-            var var_start: usize = 0;
+            comptime var var_start = 0;
             inline for (info.@"struct".fields) |field| {
                 if (@typeInfo(field.type) == .int or @typeInfo(field.type) == .bool) {
                     var_start += @sizeOf(field.type);
-                } else if (try isFixedSizeObject(field.type)) {
-                    var_start += try serializedFixedSize(field.type);
+                } else if (try comptime isFixedSizeObject(field.type)) {
+                    var_start += try comptime serializedFixedSize(field.type);
                 } else {
                     var_start += 4;
                 }

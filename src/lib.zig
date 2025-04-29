@@ -601,7 +601,8 @@ pub fn merkleize(hasher: type, chunks: []chunk, limit: ?usize, out: *[32]u8) any
     if (limit != null and chunks.len > limit.?) {
         return error.ChunkSizeExceedsLimit;
     }
-    const size = try std.math.ceilPowerOfTwo(usize, limit orelse chunks.len);
+    const power = limit orelse chunks.len;
+    const size = if (power > 0) try std.math.ceilPowerOfTwo(usize, power) else 0;
 
     // Perform the merkelization
     switch (size) {
@@ -627,6 +628,15 @@ pub fn merkleize(hasher: type, chunks: []chunk, limit: ?usize, out: *[32]u8) any
             digest.final(out);
         },
     }
+}
+
+test "merkleize an empty slice" {
+    var list = ArrayList(u8).init(std.testing.allocator);
+    defer list.deinit();
+    const chunks = &[0][32]u8{};
+    var out: [32]u8 = undefined;
+    try merkleize(sha256, chunks, null, &out);
+    try std.testing.expect(std.mem.eql(u8, out[0..], zero_chunk[0..]));
 }
 
 test "merkleize a string" {

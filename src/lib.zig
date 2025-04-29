@@ -15,6 +15,29 @@ const BYTES_PER_CHUNK = 32;
 /// Number of bytes per serialized length offset.
 const BYTES_PER_LENGTH_OFFSET = 4;
 
+pub fn serializedFixedSize(comptime T: type) !usize {
+    const info = @typeInfo(T);
+    return switch (info) {
+        .int => @sizeOf(T),
+        .array => info.array.len * try serializedFixedSize(info.array.child),
+        .pointer => switch (info.pointer.size) {
+            .slice => error.NoSerializedFixedSizeAvailable,
+            // or should we just throw error for all of pointer
+            else => serializedFixedSize(info.pointer.child),
+        },
+        .optional => error.NoSerializedFixedSizeAvailable,
+        .null => @as(usize, 0),
+        .@"struct" => |str| size: {
+            var size: usize = 0;
+            inline for (str.fields) |field| {
+                size += try serializedFixedSize(field.type);
+            }
+            break :size size;
+        },
+        else => error.NoSerializedFixedSizeAvailable,
+    };
+}
+
 // Determine the serialized size of an object so that
 // the code serializing of variable-size objects can
 // determine the offset to the next object.
@@ -22,9 +45,21 @@ pub fn serializedSize(comptime T: type, data: T) !usize {
     const info = @typeInfo(T);
     return switch (info) {
         .int => @sizeOf(T),
-        .array => data.len,
+        .array => size: {
+            var size: usize = 0;
+            for (0..data.len) |i| {
+                size += try serializedSize(info.array.child, data[i]);
+            }
+            break :size size;
+        },
         .pointer => switch (info.pointer.size) {
-            .slice => data.len,
+            .slice => size: {
+                var size: usize = 0;
+                for (0..data.len) |i| {
+                    size += try serializedSize(info.pointer.child, data[i]);
+                }
+                break :size size;
+            },
             else => serializedSize(info.pointer.child, data.*),
         },
         .optional => if (data == null)
@@ -54,6 +89,7 @@ pub fn isFixedSizeObject(comptime T: type) !bool {
                 return false;
             }
         },
+        .optional => return false,
         .pointer => |ptr| switch (ptr.size) {
             .many, .slice, .c => return false,
             .one => return isFixedSizeObject(info.pointer.child),
@@ -176,10 +212,14 @@ pub fn serialize(comptime T: type, data: T, l: *ArrayList(u8)) !void {
             // First pass, accumulate the fixed sizes
             comptime var var_start = 0;
             inline for (info.@"struct".fields) |field| {
-                if (@typeInfo(field.type) == .int or @typeInfo(field.type) == .bool) {
-                    var_start += @sizeOf(field.type);
-                } else {
-                    var_start += 4;
+                comptime {
+                    if (@typeInfo(field.type) == .int or @typeInfo(field.type) == .bool) {
+                        var_start += @sizeOf(field.type);
+                    } else if (try isFixedSizeObject(field.type)) {
+                        var_start += try serializedFixedSize(field.type);
+                    } else {
+                        var_start += 4;
+                    }
                 }
             }
 
@@ -191,8 +231,12 @@ pub fn serialize(comptime T: type, data: T, l: *ArrayList(u8)) !void {
                         try serialize(field.type, @field(data, field.name), l);
                     },
                     else => {
-                        try serialize(u32, @truncate(var_acc), l);
-                        var_acc += try serializedSize(field.type, @field(data, field.name));
+                        if (try isFixedSizeObject(field.type)) {
+                            try serialize(field.type, @field(data, field.name), l);
+                        } else {
+                            try serialize(u32, @truncate(var_acc), l);
+                            var_acc += try serializedSize(field.type, @field(data, field.name));
+                        }
                     },
                 }
             }
@@ -205,7 +249,9 @@ pub fn serialize(comptime T: type, data: T, l: *ArrayList(u8)) !void {
                             // skip fixed-size fields
                         },
                         else => {
-                            try serialize(field.type, @field(data, field.name), l);
+                            if (!try isFixedSizeObject(field.type)) {
+                                try serialize(field.type, @field(data, field.name), l);
+                            }
                         },
                     }
                 }
@@ -266,7 +312,7 @@ pub fn deserialize(comptime T: type, serialized: []const u8, out: *T, allocator:
                 const U = info.array.child;
                 if (try isFixedSizeObject(U)) {
                     comptime var i = 0;
-                    const pitch = @sizeOf(U);
+                    const pitch = try comptime serializedFixedSize(U);
                     inline while (i < out.len) : (i += pitch) {
                         try deserialize(U, serialized[i * pitch .. (i + 1) * pitch], &out[i], allocator);
                     }
@@ -361,17 +407,23 @@ pub fn deserialize(comptime T: type, serialized: []const u8, out: *T, allocator:
                 for (info.@"struct".fields) |field| {
                     switch (@typeInfo(field.type)) {
                         .int, .bool => {},
-                        else => n_var_fields += 1,
+                        else => {
+                            if (!try isFixedSizeObject(field.type)) {
+                                n_var_fields += 1;
+                            }
+                        },
                     }
                 }
             }
 
-            var indices: [n_var_fields]u32 = undefined;
+            // 0 indices array causes compiletime error for places we access indices[]
+            // also use n_var_fields instead of indices.len
+            var indices: [n_var_fields + 1]u32 = undefined;
 
             // First pass, read the value of each fixed-size field,
             // and write down the start offset of each variable-sized
             // field.
-            comptime var i = 0;
+            var i: usize = 0;
             comptime var variable_field_index = 0;
             inline for (info.@"struct".fields) |field| {
                 switch (@typeInfo(field.type)) {
@@ -381,9 +433,16 @@ pub fn deserialize(comptime T: type, serialized: []const u8, out: *T, allocator:
                         i += @sizeOf(field.type);
                     },
                     else => {
-                        try deserialize(u32, serialized[i .. i + 4], &indices[variable_field_index], allocator);
-                        i += 4;
-                        variable_field_index += 1;
+                        if (try comptime isFixedSizeObject(field.type)) {
+                            // Direct deserialize
+                            const field_serialized_size = try serializedFixedSize(field.type);
+                            try deserialize(field.type, serialized[i .. i + field_serialized_size], &@field(out.*, field.name), allocator);
+                            i += field_serialized_size;
+                        } else {
+                            try deserialize(u32, serialized[i .. i + 4], &indices[variable_field_index], allocator);
+                            i += 4;
+                            variable_field_index += 1;
+                        }
                     },
                 }
             }
@@ -398,8 +457,8 @@ pub fn deserialize(comptime T: type, serialized: []const u8, out: *T, allocator:
 
                 switch (@typeInfo(field.type)) {
                     .bool, .int => {}, // covered by the previous pass
-                    else => {
-                        const end = if (last_index == indices.len - 1) serialized.len else indices[last_index + 1];
+                    else => if (!try comptime isFixedSizeObject(field.type)) {
+                        const end = if (last_index == n_var_fields - 1) serialized.len else indices[last_index + 1];
                         try deserialize(field.type, serialized[indices[last_index]..end], &@field(out.*, field.name), allocator);
                         last_index += 1;
                     },

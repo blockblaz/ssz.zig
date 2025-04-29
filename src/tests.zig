@@ -408,8 +408,10 @@ test "deserializes an invalid Vector[N] payload" {
         @panic("missed error");
     } else |err| switch (err) {
         error.IndexOutOfBounds => {},
-        // NOTE: this is to be uncommented if slices start using allocators
-        // else => @panic(try std.fmt.allocPrint(std.testing.allocator, "wrong type of error found, err={any}", .{err})),
+        // catch error.NoSerializedFixedSizeAvailable, and a potential allocation error if the API
+        // for deserializing slices changes to accept an allocator. None of these errors should
+        // happen.
+        else => @panic(try std.fmt.allocPrint(std.testing.allocator, "wrong type of error found, err={any}", .{err})),
     }
 }
 
@@ -747,7 +749,7 @@ test "(de)serialization of Bitlist[N] when N % 8 != 0" {
     try expect(bitlist.eql(&bitlist_deser));
 }
 
-test "fixed/variable size arrays" {
+test "structs with nested fixed/variable size u8 array" {
     const Bytes32 = [32]u8;
     var isFixedSizeType = try isFixedSizeObject(Bytes32);
     try expect(isFixedSizeType == true);
@@ -756,7 +758,7 @@ test "fixed/variable size arrays" {
     isFixedSizeType = try isFixedSizeObject(BytesVar);
     try expect(isFixedSizeType == false);
 
-    // test for nested but fixed structures
+    // 1.1 test for nested but fixed structures
     const FixedBlockBody = struct {
         slot: u64,
         data: [4]u8,
@@ -768,14 +770,42 @@ test "fixed/variable size arrays" {
         state_root: Bytes32,
         body: FixedBlockBody,
     };
-    const FixedBeamBlock = struct {
+    const FixedSignedBlock = struct {
         message: FixedBlock,
         signature: [48]u8,
     };
-    isFixedSizeType = try isFixedSizeObject(FixedBeamBlock);
+    isFixedSizeType = try isFixedSizeObject(FixedSignedBlock);
     try expect(isFixedSizeType == true);
+    const fixed_signed_block = FixedSignedBlock{
+        .message = .{
+            .slot = 9,
+            .proposer_index = 3,
+            .parent_root = [_]u8{ 199, 128, 9, 253, 240, 127, 197, 106, 17, 241, 34, 55, 6, 88, 163, 83, 170, 165, 66, 237, 99, 228, 76, 75, 193, 95, 244, 205, 16, 90, 179, 60 },
+            .state_root = [_]u8{ 81, 12, 244, 147, 45, 160, 28, 192, 208, 78, 159, 151, 165, 43, 244, 44, 103, 197, 231, 128, 122, 15, 182, 90, 109, 10, 229, 68, 229, 60, 50, 231 },
+            .body = .{ .slot = 9, .data = [_]u8{ 1, 2, 3, 4 } },
+        },
+        .signature = [_]u8{2} ** 48,
+    };
+    var serialized_fixed_block = std.ArrayList(u8).init(std.testing.allocator);
+    defer serialized_fixed_block.deinit();
+    try serialize(FixedSignedBlock, fixed_signed_block, &serialized_fixed_block);
+    // 1.2 verified on an equivalent nodejs container implementation
+    const expected_serialized_fixed_block = [_]u8{ 9, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 199, 128, 9, 253, 240, 127, 197, 106, 17, 241, 34, 55, 6, 88, 163, 83, 170, 165, 66, 237, 99, 228, 76, 75, 193, 95, 244, 205, 16, 90, 179, 60, 81, 12, 244, 147, 45, 160, 28, 192, 208, 78, 159, 151, 165, 43, 244, 44, 103, 197, 231, 128, 122, 15, 182, 90, 109, 10, 229, 68, 229, 60, 50, 231, 9, 0, 0, 0, 0, 0, 0, 0, 1, 2, 3, 4, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2 };
+    try expect(std.mem.eql(u8, serialized_fixed_block.items, expected_serialized_fixed_block[0..]));
 
-    // test for nested variable structures
+    var deserialized_fixed_block: FixedSignedBlock = undefined;
+    try deserialize(FixedSignedBlock, serialized_fixed_block.items[0..], &deserialized_fixed_block, std.testing.allocator);
+
+    // 1.3 match the individual fields
+    try expect(std.mem.eql(u8, fixed_signed_block.signature[0..], deserialized_fixed_block.signature[0..]));
+    try expect(fixed_signed_block.message.slot == deserialized_fixed_block.message.slot);
+    try expect(fixed_signed_block.message.proposer_index == deserialized_fixed_block.message.proposer_index);
+    try expect(std.mem.eql(u8, fixed_signed_block.message.parent_root[0..], deserialized_fixed_block.message.parent_root[0..]));
+    try expect(std.mem.eql(u8, fixed_signed_block.message.state_root[0..], deserialized_fixed_block.message.state_root[0..]));
+    try expect(fixed_signed_block.message.body.slot == deserialized_fixed_block.message.body.slot);
+    try expect(std.mem.eql(u8, fixed_signed_block.message.body.data[0..], deserialized_fixed_block.message.body.data[0..]));
+
+    // 2.1 test for nested variable structures
     const VarBlockBody = struct {
         slot: u64,
         data: []u8,
@@ -787,10 +817,43 @@ test "fixed/variable size arrays" {
         state_root: Bytes32,
         body: VarBlockBody,
     };
-    const VarBeamBlock = struct {
+    const VarSignedBlock = struct {
         message: VarBlock,
         signature: [48]u8,
     };
-    isFixedSizeType = try isFixedSizeObject(VarBeamBlock);
+    isFixedSizeType = try isFixedSizeObject(VarSignedBlock);
     try expect(isFixedSizeType == false);
+
+    var varData = [_]u8{ 1, 2, 3, 4 };
+    const var_signed_block = VarSignedBlock{
+        .message = .{
+            .slot = 9,
+            .proposer_index = 3,
+            .parent_root = [_]u8{ 199, 128, 9, 253, 240, 127, 197, 106, 17, 241, 34, 55, 6, 88, 163, 83, 170, 165, 66, 237, 99, 228, 76, 75, 193, 95, 244, 205, 16, 90, 179, 60 },
+            .state_root = [_]u8{ 81, 12, 244, 147, 45, 160, 28, 192, 208, 78, 159, 151, 165, 43, 244, 44, 103, 197, 231, 128, 122, 15, 182, 90, 109, 10, 229, 68, 229, 60, 50, 231 },
+            .body = .{ .slot = 9, .data = &varData },
+        },
+        .signature = [_]u8{2} ** 48,
+    };
+
+    var serialized_var_block = std.ArrayList(u8).init(std.testing.allocator);
+    defer serialized_var_block.deinit();
+    try serialize(VarSignedBlock, var_signed_block, &serialized_var_block);
+    // 2.2 verified on an equivalent nodejs container implementation
+    const expected_serialized_var_block = [_]u8{ 52, 0, 0, 0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 9, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 199, 128, 9, 253, 240, 127, 197, 106, 17, 241, 34, 55, 6, 88, 163, 83, 170, 165, 66, 237, 99, 228, 76, 75, 193, 95, 244, 205, 16, 90, 179, 60, 81, 12, 244, 147, 45, 160, 28, 192, 208, 78, 159, 151, 165, 43, 244, 44, 103, 197, 231, 128, 122, 15, 182, 90, 109, 10, 229, 68, 229, 60, 50, 231, 84, 0, 0, 0, 9, 0, 0, 0, 0, 0, 0, 0, 12, 0, 0, 0, 1, 2, 3, 4 };
+    try expect(std.mem.eql(u8, serialized_var_block.items, expected_serialized_var_block[0..]));
+
+    var deserialized_var_block: VarSignedBlock = undefined;
+    try deserialize(VarSignedBlock, serialized_var_block.items[0..], &deserialized_var_block, std.testing.allocator);
+    // how should the things to be de-inited accumulated?
+    defer std.testing.allocator.free(deserialized_var_block.message.body.data);
+
+    // 2.3 match the individual fields
+    try expect(std.mem.eql(u8, var_signed_block.signature[0..], deserialized_var_block.signature[0..]));
+    try expect(var_signed_block.message.slot == deserialized_var_block.message.slot);
+    try expect(var_signed_block.message.proposer_index == deserialized_var_block.message.proposer_index);
+    try expect(std.mem.eql(u8, var_signed_block.message.parent_root[0..], deserialized_var_block.message.parent_root[0..]));
+    try expect(std.mem.eql(u8, var_signed_block.message.state_root[0..], deserialized_var_block.message.state_root[0..]));
+    try expect(var_signed_block.message.body.slot == deserialized_var_block.message.body.slot);
+    try expect(std.mem.eql(u8, var_signed_block.message.body.data[0..], deserialized_var_block.message.body.data[0..]));
 }

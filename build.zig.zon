@@ -2,5 +2,11 @@
     .name = .ssz,
     .fingerprint = 0x1d34bd0ceb1dfc2d,
     .version = "0.0.4",
+    .dependencies = .{
+        .tweak_hash = .{
+            .url = "git+https://github.com/bhaskar1001101/tweak-hash#63611fd65d9db28a7ea342ff2fd61b1e201727fd",
+            .hash = "tweak_hash-0.0.0-b5xZ7JkRAABSp1CPFJpayRnzIt2tnLjzjTPfveqLiUXu",
+        },
+    },
     .paths = .{""},
 }

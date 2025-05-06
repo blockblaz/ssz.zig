@@ -818,3 +818,88 @@ fn bytesToBits(comptime N: usize, src: [N]u8) [N * 8]bool {
     }
     return bitvector;
 }
+
+pub const MerkleTree = [][]u8;
+pub const MerklePath = [][]u8;
+
+// returns a full merkle tree with a tweakable hash function from provided leaf hashes
+pub fn merkleizeWithTweak(comptime TweakHash: type, hash: TweakHash, allocator: std.mem.Allocator, parameter: []u8, chunks: [][]u8) !MerkleTree {
+    const num_leaves = chunks.len;
+    std.debug.assert(std.math.isPowerOfTwo(num_leaves));
+
+    const node_count = (2 * num_leaves) - 1;
+    var nodes = try allocator.alloc([]u8, node_count);
+
+    for (chunks, 0..) |c, i| {
+        const leaf_pos = node_count - num_leaves + i;
+        nodes[leaf_pos] = try allocator.dupe(u8, c);
+    }
+
+    var level: u8 = 1;
+    var level_size: usize = num_leaves / 2;
+    var level_offset: usize = node_count - num_leaves - level_size;
+
+    while (level_size > 0) {
+        for (0..level_size) |i| {
+            const left_child = nodes[level_offset + level_size + i * 2];
+            const right_child = nodes[level_offset + level_size + i * 2 + 1];
+
+            var combined = [_][]u8{ left_child, right_child };
+
+            nodes[level_offset + i] = try allocator.alloc(u8, hash.hash_size);
+            const tweak = hash.tree_tweak(level, @as(u32, @intCast(i)));
+            hash.hash(parameter, tweak, &combined, nodes[level_offset + i]);
+        }
+
+        level += 1;
+        level_size /= 2;
+        level_offset -= level_size;
+    }
+
+    return nodes;
+}
+
+// returns a merkle path from a leaf to the root
+pub fn buildPath(allocator: std.mem.Allocator, tree: MerkleTree, leaf_index: usize) !MerklePath {
+    const height = std.math.log2_int(usize, tree.len);
+
+    var path = try allocator.alloc([]u8, height);
+    var current_index = leaf_index;
+    const num_leaves = @as(u32, 1) << @intCast(height);
+    const total_nodes = (2 * num_leaves) - 1;
+    var node_index = total_nodes - num_leaves + current_index;
+    for (0..height) |level| {
+        const is_left = current_index % 2 == 0;
+        const sibling_offset: isize = if (is_left) 1 else -1;
+
+        const sibling_node_index: usize = @intCast(@as(isize, @intCast(node_index)) + sibling_offset);
+        path[level] = try allocator.dupe(u8, tree[sibling_node_index]);
+
+        current_index /= 2;
+        node_index = (node_index - 1) / 2;
+    }
+
+    return path;
+}
+
+// verify a merkle path
+pub fn verifyPath(comptime TweakHash: type, parameter: []u8, hash: TweakHash, leaf_index: usize, root: []u8, leaf_hash: []u8, path: MerklePath) bool {
+    var current_index = leaf_index;
+    for (0..path.len) |level| {
+        const is_left = current_index % 2 == 0;
+        const sibling = path[level];
+
+        const combined = if (is_left) [_][]u8{ leaf_hash, sibling } else [_][]u8{ sibling, leaf_hash };
+        const tweak = hash.tree_tweak(@as(u8, @intCast(level + 1)), @as(u32, @intCast(current_index / 2)));
+
+        hash.hash(parameter, tweak, &combined, leaf_hash);
+
+        current_index /= 2;
+    }
+
+    return std.mem.eql(u8, leaf_hash, root);
+}
+
+pub fn treeRoot(tree: MerkleTree) []u8 {
+    return tree[0];
+}

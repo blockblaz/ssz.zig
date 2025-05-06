@@ -24,11 +24,17 @@ pub fn build(b: *Builder) void {
         .target = target,
     });
     const run_main_tests = b.addRunArtifact(main_tests);
+
     const tests_tests = b.addTest(.{
         .root_source_file = .{ .cwd_relative = "src/tests.zig" },
         .optimize = optimize,
         .target = target,
     });
+    const tweak_hash = b.dependency("tweak_hash", .{
+        .target = target,
+        .optimize = optimize,
+    }).module("tweak_hash");
+    tests_tests.root_module.addImport("tweak_hash", tweak_hash);
     tests_tests.root_module.addImport("ssz.zig", mod);
     const run_tests_tests = b.addRunArtifact(tests_tests);
 

@@ -858,7 +858,7 @@ test "structs with nested fixed/variable size u8 array" {
     try expect(std.mem.eql(u8, var_signed_block.message.body.data[0..], deserialized_var_block.message.body.data[0..]));
 }
 
-test "slice hashtree root" {
+test "slice hashtree root composite type" {
     const Root = [32]u8;
     const RootsList = []Root;
     const test_root = [_]u8{23} ** 32;
@@ -872,6 +872,24 @@ test "slice hashtree root" {
         &hash_root,
         std.testing.allocator,
     );
+    // computed from nodejs ssz lib for List[Root,1] type
     const expected_hash_root = [_]u8{ 201, 4, 170, 72, 175, 156, 205, 129, 106, 122, 167, 33, 61, 252, 122, 166, 229, 206, 174, 229, 187, 84, 208, 210, 207, 170, 189, 80, 70, 9, 184, 82 };
+    try expect(std.mem.eql(u8, &expected_hash_root, &hash_root));
+}
+
+test "slice hashtree root simple type" {
+    const DynamicRoot = []u8;
+    // merkelizes as List[u8,33] as dynamic data length is mixed in as bounded type
+    var test_root = [_]u8{23} ** 33;
+
+    var hash_root: [32]u8 = undefined;
+    try hashTreeRoot(
+        DynamicRoot,
+        &test_root,
+        &hash_root,
+        std.testing.allocator,
+    );
+    // computed from nodejs ssz lib for List[u8,33]
+    const expected_hash_root = [_]u8{ 229, 104, 130, 10, 13, 251, 109, 221, 13, 70, 107, 87, 182, 228, 3, 211, 49, 235, 199, 224, 42, 133, 57, 250, 72, 21, 166, 87, 206, 112, 35, 203 };
     try expect(std.mem.eql(u8, &expected_hash_root, &hash_root));
 }

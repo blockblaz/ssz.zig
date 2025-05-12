@@ -775,7 +775,9 @@ pub fn hashTreeRoot(comptime T: type, value: T, out: *[32]u8, allctr: Allocator)
                             var list = ArrayList(u8).init(allctr);
                             defer list.deinit();
                             const chunks = try pack(T, value, &list);
-                            try merkleize(chunks, null, out);
+                            var tmp: chunk = undefined;
+                            try merkleize(sha256, chunks, null, &tmp);
+                            mixInLength2(tmp, value.len, out);
                         },
                         // use bitlist
                         .bool => return error.UnSupportedPointerType,

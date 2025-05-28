@@ -54,7 +54,8 @@ pub fn serializedSize(comptime T: type, data: T) !usize {
         },
         .pointer => switch (info.pointer.size) {
             .slice => size: {
-                var size: usize = 0;
+                // 4 byes for encoding size
+                var size: usize = if (try isFixedSizeObject(info.pointer.child)) 0 else 4;
                 for (0..data.len) |i| {
                     size += try serializedSize(info.pointer.child, data[i]);
                 }
@@ -70,6 +71,10 @@ pub fn serializedSize(comptime T: type, data: T) !usize {
         .@"struct" => |str| size: {
             var size: usize = 0;
             inline for (str.fields) |field| {
+                const is_field_fixed_size = try isFixedSizeObject(field.type);
+                if (is_field_fixed_size == false) {
+                    size += 4;
+                }
                 size += try serializedSize(field.type, @field(data, field.name));
             }
             break :size size;

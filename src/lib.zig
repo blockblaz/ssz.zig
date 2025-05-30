@@ -54,7 +54,8 @@ pub fn serializedSize(comptime T: type, data: T) !usize {
         },
         .pointer => switch (info.pointer.size) {
             .slice => size: {
-                var size: usize = 0;
+                // 4 byes for encoding size
+                var size: usize = if (try isFixedSizeObject(info.pointer.child)) 0 else 4;
                 for (0..data.len) |i| {
                     size += try serializedSize(info.pointer.child, data[i]);
                 }
@@ -70,6 +71,10 @@ pub fn serializedSize(comptime T: type, data: T) !usize {
         .@"struct" => |str| size: {
             var size: usize = 0;
             inline for (str.fields) |field| {
+                const is_field_fixed_size = try isFixedSizeObject(field.type);
+                if (is_field_fixed_size == false) {
+                    size += 4;
+                }
                 size += try serializedSize(field.type, @field(data, field.name));
             }
             break :size size;
@@ -487,6 +492,16 @@ pub fn deserialize(comptime T: type, serialized: []const u8, out: *T, allocator:
     }
 }
 
+fn mixInLength2(root: [32]u8, length: usize, out: *[32]u8) void {
+    var hasher = sha256.init(sha256.Options{});
+    hasher.update(root[0..]);
+
+    var tmp = [_]u8{0} ** 32;
+    std.mem.writeInt(@TypeOf(length), tmp[0..@sizeOf(@TypeOf(length))], length, std.builtin.Endian.little);
+    hasher.update(tmp[0..]);
+    hasher.final(out[0..]);
+}
+
 fn mixInLength(root: [32]u8, length: [32]u8, out: *[32]u8) void {
     var hasher = sha256.init(sha256.Options{});
     hasher.update(root[0..]);
@@ -765,9 +780,24 @@ pub fn hashTreeRoot(comptime T: type, value: T, out: *[32]u8, allctr: Allocator)
                             var list = ArrayList(u8).init(allctr);
                             defer list.deinit();
                             const chunks = try pack(T, value, &list);
-                            merkleize(chunks, null, out);
+                            var tmp: chunk = undefined;
+                            try merkleize(sha256, chunks, null, &tmp);
+                            mixInLength2(tmp, value.len, out);
                         },
-                        else => return error.UnSupportedPointerType,
+                        // use bitlist
+                        .bool => return error.UnSupportedPointerType,
+                        // composite type
+                        else => {
+                            var chunks = ArrayList(chunk).init(allctr);
+                            defer chunks.deinit();
+                            var tmp: chunk = undefined;
+                            for (value) |item| {
+                                try hashTreeRoot(@TypeOf(item), item, &tmp, allctr);
+                                try chunks.append(tmp);
+                            }
+                            try merkleize(sha256, chunks.items, null, &tmp);
+                            mixInLength2(tmp, chunks.items.len, out);
+                        },
                     }
                 },
                 else => return error.UnSupportedPointerType,

@@ -857,3 +857,160 @@ test "structs with nested fixed/variable size u8 array" {
     try expect(var_signed_block.message.body.slot == deserialized_var_block.message.body.slot);
     try expect(std.mem.eql(u8, var_signed_block.message.body.data[0..], deserialized_var_block.message.body.data[0..]));
 }
+
+test "slice hashtree root composite type" {
+    const Root = [32]u8;
+    const RootsList = []Root;
+    const test_root = [_]u8{23} ** 32;
+    // merkelizes as List[Root,1] as dynamic data length is mixed in as bounded type
+    var roots_list = [_]Root{test_root};
+
+    var hash_root: [32]u8 = undefined;
+    try hashTreeRoot(
+        RootsList,
+        &roots_list,
+        &hash_root,
+        std.testing.allocator,
+    );
+    // computed from nodejs ssz lib for List[Root,1] type
+    const expected_hash_root = [_]u8{ 201, 4, 170, 72, 175, 156, 205, 129, 106, 122, 167, 33, 61, 252, 122, 166, 229, 206, 174, 229, 187, 84, 208, 210, 207, 170, 189, 80, 70, 9, 184, 82 };
+    try expect(std.mem.eql(u8, &expected_hash_root, &hash_root));
+}
+
+test "slice hashtree root simple type" {
+    const DynamicRoot = []u8;
+    // merkelizes as List[u8,33] as dynamic data length is mixed in as bounded type
+    var test_root = [_]u8{23} ** 33;
+
+    var hash_root: [32]u8 = undefined;
+    try hashTreeRoot(
+        DynamicRoot,
+        &test_root,
+        &hash_root,
+        std.testing.allocator,
+    );
+    // computed from nodejs ssz lib for List[u8,33]
+    const expected_hash_root = [_]u8{ 229, 104, 130, 10, 13, 251, 109, 221, 13, 70, 107, 87, 182, 228, 3, 211, 49, 235, 199, 224, 42, 133, 57, 250, 72, 21, 166, 87, 206, 112, 35, 203 };
+    try expect(std.mem.eql(u8, &expected_hash_root, &hash_root));
+}
+
+test "zeam stf input" {
+    const Bytes32 = [32]u8;
+    const Bytes48 = [48]u8;
+    const ExecutionPayloadHeader = struct {
+        timestamp: u64,
+    };
+    const Mini3SFCheckpoint = struct {
+        root: Bytes32,
+        slot: u64,
+    };
+    const Mini3SFVote = struct {
+        validator_id: u64,
+        slot: u64,
+        head: Mini3SFCheckpoint,
+        target: Mini3SFCheckpoint,
+        source: Mini3SFCheckpoint,
+    };
+    const BeamBlockBody = struct {
+        // some form of APS
+        execution_payload_header: ExecutionPayloadHeader,
+        // mini 3sf simplified votes
+        votes: []Mini3SFVote,
+    };
+    const BeamBlock = struct {
+        slot: u64,
+        proposer_index: u64,
+        parent_root: Bytes32,
+        state_root: Bytes32,
+        body: BeamBlockBody,
+    };
+
+    const SignedBeamBlock = struct {
+        message: BeamBlock,
+        // winternitz signature might be of different size depending on num chunks and chunk size
+        signature: Bytes48,
+    };
+
+    const BeamStateConfig = struct {
+        num_validators: u64,
+    };
+    const BeamBlockHeader = struct {
+        slot: u64,
+        proposer_index: u64,
+        parent_root: Bytes32,
+        state_root: Bytes32,
+        body_root: Bytes32,
+    };
+    const BeamState = struct {
+        config: BeamStateConfig,
+        genesis_time: u64,
+        slot: u64,
+        latest_block_header: BeamBlockHeader,
+        latest_justified: Mini3SFCheckpoint,
+        lastest_finalized: Mini3SFCheckpoint,
+        historical_block_hashes: []Bytes32,
+        justified_slots: []u8,
+
+        // a flat representation of the justifications map
+        justifications_roots: []Bytes32,
+        justifications_validators: []u8,
+    };
+    const BeamSTFProverInput = struct {
+        block: SignedBeamBlock,
+        state: BeamState,
+    };
+
+    const config = BeamStateConfig{ .num_validators = 4 };
+    const genesis_root = [_]u8{9} ** 32;
+    var justifications_roots = [_]Bytes32{genesis_root};
+    var justifications_validators = [_]u8{ 0, 1, 1, 1 };
+
+    const state = BeamState{
+        .config = config,
+        .genesis_time = 93,
+        .slot = 99,
+        .latest_block_header = .{
+            .slot = 0,
+            .proposer_index = 0,
+            .parent_root = [_]u8{1} ** 32,
+            .state_root = [_]u8{2} ** 32,
+            .body_root = [_]u8{3} ** 32,
+        },
+        // mini3sf
+        .latest_justified = .{ .root = [_]u8{5} ** 32, .slot = 0 },
+        .lastest_finalized = .{ .root = [_]u8{4} ** 32, .slot = 0 },
+        .historical_block_hashes = &[_]Bytes32{},
+        .justified_slots = &[_]u8{},
+        .justifications_roots = &justifications_roots,
+        .justifications_validators = &justifications_validators,
+    };
+
+    const block = SignedBeamBlock{
+        .message = .{
+            .slot = 9,
+            .proposer_index = 3,
+            .parent_root = [_]u8{ 199, 128, 9, 253, 240, 127, 197, 106, 17, 241, 34, 55, 6, 88, 163, 83, 170, 165, 66, 237, 99, 228, 76, 75, 193, 95, 244, 205, 16, 90, 179, 60 },
+            .state_root = [_]u8{ 81, 12, 244, 147, 45, 160, 28, 192, 208, 78, 159, 151, 165, 43, 244, 44, 103, 197, 231, 128, 122, 15, 182, 90, 109, 10, 229, 68, 229, 60, 50, 231 },
+            .body = .{ .execution_payload_header = ExecutionPayloadHeader{ .timestamp = 23 }, .votes = &[_]Mini3SFVote{} },
+        },
+        .signature = [_]u8{2} ** 48,
+    };
+
+    const prover_input = BeamSTFProverInput{
+        .state = state,
+        .block = block,
+    };
+
+    var arena_allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_allocator.deinit();
+
+    var serialized = std.ArrayList(u8).init(arena_allocator.allocator());
+    defer serialized.deinit();
+    try serialize(BeamSTFProverInput, prover_input, &serialized);
+
+    var prover_input_deserialized: BeamSTFProverInput = undefined;
+    try deserialize(BeamSTFProverInput, serialized.items[0..], &prover_input_deserialized, arena_allocator.allocator());
+    try expect(std.mem.eql(u8, &prover_input.block.message.parent_root, &prover_input_deserialized.block.message.parent_root));
+    try expect(std.mem.eql(u8, &prover_input.state.lastest_finalized.root, &prover_input_deserialized.state.lastest_finalized.root));
+    try expect(std.mem.eql(u8, prover_input.state.justifications_validators, prover_input_deserialized.state.justifications_validators));
+}

@@ -1,5 +1,6 @@
 const libssz = @import("ssz.zig");
-const utils = libssz.utils;
+const List = libssz.List;
+const Bitlist = libssz.Bitlist;
 const serialize = libssz.serialize;
 const deserialize = libssz.deserialize;
 const chunkCount = libssz.chunkCount;
@@ -672,7 +673,7 @@ test "calculate the root hash of an union" {
 
 test "(de)serialize List[N] of fixed-length objects" {
     const MAX_VALIDATORS_PER_COMMITTEE: usize = 2048;
-    const ListValidatorIndex = utils.List(u64, MAX_VALIDATORS_PER_COMMITTEE);
+    const ListValidatorIndex = List(u64, MAX_VALIDATORS_PER_COMMITTEE);
     var attesting_indices = try ListValidatorIndex.init(0);
     for (0..10) |i| {
         try attesting_indices.append(i * 100);
@@ -686,7 +687,7 @@ test "(de)serialize List[N] of fixed-length objects" {
 }
 
 test "(de)serialize List[N] of variable-length objects" {
-    const ListOfStrings = utils.List([]const u8, 16);
+    const ListOfStrings = List([]const u8, 16);
     var string_list = try ListOfStrings.init(0);
     for (0..10) |i| {
         try string_list.append(try std.fmt.allocPrint(std.testing.allocator, "count={}", .{i}));
@@ -706,7 +707,7 @@ test "(de)serialize List[N] of variable-length objects" {
 }
 
 test "List[N].fromSlice of structs" {
-    const PastryList = utils.List(Pastry, 100);
+    const PastryList = List(Pastry, 100);
     var start: usize = 0;
     var end: usize = pastries.len;
     _ = .{ &start, &end };
@@ -718,7 +719,7 @@ test "List[N].fromSlice of structs" {
 }
 
 test "(de)serialization of Bitlist[N]" {
-    var bitlist = try utils.Bitlist(10).init(0);
+    var bitlist = try Bitlist(10).init(0);
     try bitlist.append(true);
     try bitlist.append(false);
     try bitlist.append(true);
@@ -733,7 +734,7 @@ test "(de)serialization of Bitlist[N]" {
 }
 
 test "(de)serialization of Bitlist[N] when N % 8 != 0" {
-    var bitlist = try utils.Bitlist(3).init(0);
+    var bitlist = try Bitlist(3).init(0);
     try bitlist.append(true);
     try bitlist.append(false);
     try bitlist.append(true);

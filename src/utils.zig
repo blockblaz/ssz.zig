@@ -64,6 +64,10 @@ pub fn List(comptime T: type, comptime N: usize) type {
             return self.inner.slice();
         }
 
+        pub fn constSlice(self: *const Self) []const T {
+            return self.inner.constSlice();
+        }
+
         pub fn fromSlice(m: []const T) error{Overflow}!Self {
             return .{ .inner = try Inner.fromSlice(m) };
         }

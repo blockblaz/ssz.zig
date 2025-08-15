@@ -83,6 +83,42 @@ pub fn serializedSize(comptime T: type, data: T) !usize {
     };
 }
 
+/// Returns true if the type is a utils.List type
+fn isListType(comptime T: type) bool {
+    const type_info = @typeInfo(T);
+    if (type_info != .@"struct") return false;
+    
+    const has_inner = comptime for (type_info.@"struct".fields) |field| {
+        if (std.mem.eql(u8, field.name, "inner")) break true;
+    } else false;
+    
+    return has_inner and
+        std.meta.hasFn(T, "sszEncode") and
+        std.meta.hasFn(T, "sszDecode") and
+        std.meta.hasFn(T, "append") and
+        std.meta.hasFn(T, "slice");
+}
+
+/// Returns true if the type is a utils.Bitlist type
+fn isBitlistType(comptime T: type) bool {
+    const type_info = @typeInfo(T);
+    if (type_info != .@"struct") return false;
+    
+    const has_inner = comptime for (type_info.@"struct".fields) |field| {
+        if (std.mem.eql(u8, field.name, "inner")) break true;
+    } else false;
+    
+    const has_length = comptime for (type_info.@"struct".fields) |field| {
+        if (std.mem.eql(u8, field.name, "length")) break true;
+    } else false;
+    
+    return has_inner and has_length and
+        std.meta.hasFn(T, "sszEncode") and
+        std.meta.hasFn(T, "sszDecode") and
+        std.meta.hasFn(T, "get") and
+        std.meta.hasFn(T, "set");
+}
+
 /// Returns true if an object is of fixed size
 pub fn isFixedSizeObject(comptime T: type) !bool {
     const info = @typeInfo(T);
@@ -731,7 +767,81 @@ fn packBits(bits: []const bool, l: *ArrayList(u8)) ![]chunk {
     return std.mem.bytesAsSlice(chunk, l.items);
 }
 
+fn hashTreeRootList(comptime T: type, value: T, out: *[32]u8, allctr: Allocator) !void {
+    const slice = value.constSlice();
+    
+    if (slice.len == 0) {
+        const tmp: chunk = zero_chunk;
+        mixInLength2(tmp, 0, out);
+        return;
+    }
+    
+    const Item = @TypeOf(slice[0]);
+    switch (@typeInfo(Item)) {
+        .int => {
+            var list = ArrayList(u8).init(allctr);
+            defer list.deinit();
+            const chunks = try pack([]const Item, slice, &list);
+            var tmp: chunk = undefined;
+            try merkleize(sha256, chunks, null, &tmp);
+            mixInLength2(tmp, slice.len, out);
+        },
+        else => {
+            var chunks = ArrayList(chunk).init(allctr);
+            defer chunks.deinit();
+            var tmp: chunk = undefined;
+            for (slice) |item| {
+                try hashTreeRoot(Item, item, &tmp, allctr);
+                try chunks.append(tmp);
+            }
+            try merkleize(sha256, chunks.items, null, &tmp);
+            mixInLength2(tmp, slice.len, out);
+        },
+    }
+}
+
+fn hashTreeRootBitlist(comptime T: type, value: T, out: *[32]u8, allctr: Allocator) !void {
+    const bit_length = value.length;
+    if (bit_length == 0) {
+        const tmp: chunk = zero_chunk;
+        mixInLength2(tmp, 0, out);
+        return;
+    }
+    
+    var list = ArrayList(u8).init(allctr);
+    defer list.deinit();
+    
+    const byte_slice = value.inner.constSlice();
+    const full_bytes = bit_length / 8;
+    const remaining_bits = bit_length % 8;
+    
+    if (full_bytes > 0) {
+        try list.appendSlice(byte_slice[0..full_bytes]);
+    }
+    
+    if (remaining_bits > 0) {
+        const last_byte = byte_slice[full_bytes];
+        const mask = (@as(u8, 1) << @truncate(remaining_bits)) - 1;
+        try list.append(last_byte & mask);
+    }
+    
+    const padding_size = (BYTES_PER_CHUNK - list.items.len % BYTES_PER_CHUNK) % BYTES_PER_CHUNK;
+    _ = try list.writer().write(zero_chunk[0..padding_size]);
+    
+    const chunks = std.mem.bytesAsSlice(chunk, list.items);
+    var tmp: chunk = undefined;
+    try merkleize(sha256, chunks, null, &tmp);
+    mixInLength2(tmp, bit_length, out);
+}
+
 pub fn hashTreeRoot(comptime T: type, value: T, out: *[32]u8, allctr: Allocator) !void {
+    if (comptime isListType(T)) {
+        return hashTreeRootList(T, value, out, allctr);
+    }
+    if (comptime isBitlistType(T)) {
+        return hashTreeRootBitlist(T, value, out, allctr);
+    }
+    
     const type_info = @typeInfo(T);
     switch (type_info) {
         .int, .bool => {

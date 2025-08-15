@@ -1,4 +1,4 @@
-const libssz = @import("ssz.zig");
+const libssz = @import("lib.zig");
 const utils = libssz.utils;
 const serialize = libssz.serialize;
 const deserialize = libssz.deserialize;
@@ -892,6 +892,162 @@ test "slice hashtree root simple type" {
     // computed from nodejs ssz lib for List[u8,33]
     const expected_hash_root = [_]u8{ 229, 104, 130, 10, 13, 251, 109, 221, 13, 70, 107, 87, 182, 228, 3, 211, 49, 235, 199, 224, 42, 133, 57, 250, 72, 21, 166, 87, 206, 112, 35, 203 };
     try expect(std.mem.eql(u8, &expected_hash_root, &hash_root));
+}
+
+test "List tree root calculation" {
+    const ListU64 = utils.List(u64, 1024);
+    
+    const empty_list = try ListU64.init(0);
+    var list_with_items = try ListU64.init(0);
+    try list_with_items.append(42);
+    try list_with_items.append(123);
+    try list_with_items.append(456);
+    
+    var empty_hash: [32]u8 = undefined;
+    var filled_hash: [32]u8 = undefined;
+    
+    try hashTreeRoot(ListU64, empty_list, &empty_hash, std.testing.allocator);
+    try hashTreeRoot(ListU64, list_with_items, &filled_hash, std.testing.allocator);
+    
+    try expect(!std.mem.eql(u8, &empty_hash, &filled_hash));
+    
+    var same_content_list = try ListU64.init(0);
+    try same_content_list.append(42);
+    try same_content_list.append(123);
+    try same_content_list.append(456);
+    
+    var same_content_hash: [32]u8 = undefined;
+    try hashTreeRoot(ListU64, same_content_list, &same_content_hash, std.testing.allocator);
+    
+    try expect(std.mem.eql(u8, &filled_hash, &same_content_hash));
+}
+
+test "Bitlist tree root calculation" {
+    const TestBitlist = utils.Bitlist(256);
+    
+    const empty_bitlist = try TestBitlist.init(0);
+    var filled_bitlist = try TestBitlist.init(0);
+    try filled_bitlist.append(true);
+    try filled_bitlist.append(false);
+    try filled_bitlist.append(true);
+    try filled_bitlist.append(true);
+    
+    var empty_hash: [32]u8 = undefined;
+    var filled_hash: [32]u8 = undefined;
+    
+    try hashTreeRoot(TestBitlist, empty_bitlist, &empty_hash, std.testing.allocator);
+    try hashTreeRoot(TestBitlist, filled_bitlist, &filled_hash, std.testing.allocator);
+    
+    try expect(!std.mem.eql(u8, &empty_hash, &filled_hash));
+    
+    var same_content_bitlist = try TestBitlist.init(0);
+    try same_content_bitlist.append(true);
+    try same_content_bitlist.append(false);
+    try same_content_bitlist.append(true);
+    try same_content_bitlist.append(true);
+    
+    var same_content_hash: [32]u8 = undefined;
+    try hashTreeRoot(TestBitlist, same_content_bitlist, &same_content_hash, std.testing.allocator);
+    
+    try expect(std.mem.eql(u8, &filled_hash, &same_content_hash));
+}
+
+test "List of composite types tree root" {
+    const ListOfPastry = utils.List(Pastry, 100);
+    
+    var pastry_list = try ListOfPastry.init(0);
+    try pastry_list.append(Pastry{ .name = "croissant", .weight = 20 });
+    try pastry_list.append(Pastry{ .name = "muffin", .weight = 30 });
+    
+    var hash1: [32]u8 = undefined;
+    try hashTreeRoot(ListOfPastry, pastry_list, &hash1, std.testing.allocator);
+    
+    var pastry_list2 = try ListOfPastry.init(0);
+    try pastry_list2.append(Pastry{ .name = "croissant", .weight = 20 });
+    try pastry_list2.append(Pastry{ .name = "muffin", .weight = 30 });
+    
+    var hash2: [32]u8 = undefined;
+    try hashTreeRoot(ListOfPastry, pastry_list2, &hash2, std.testing.allocator);
+    
+    try expect(std.mem.eql(u8, &hash1, &hash2));
+    
+    try pastry_list2.append(Pastry{ .name = "bagel", .weight = 25 });
+    var hash3: [32]u8 = undefined;
+    try hashTreeRoot(ListOfPastry, pastry_list2, &hash3, std.testing.allocator);
+    
+    try expect(!std.mem.eql(u8, &hash1, &hash3));
+}
+
+test "Zeam-style List/Bitlist usage with tree root stability" {
+    const MAX_VALIDATORS = 2048;
+    const MAX_HISTORICAL_BLOCK_HASHES = 4096;
+    
+    const Root = [32]u8;
+    
+    const Mini3SFCheckpoint = struct {
+        root: Root,
+        slot: u64,
+    };
+    
+    const Mini3SFVote = struct {
+        validator_id: u64,
+        slot: u64,
+        head: Mini3SFCheckpoint,
+        target: Mini3SFCheckpoint,
+        source: Mini3SFCheckpoint,
+    };
+    
+    const Mini3SFVotes = utils.List(Mini3SFVote, MAX_VALIDATORS);
+    const HistoricalBlockHashes = utils.List(Root, MAX_HISTORICAL_BLOCK_HASHES);
+    const JustifiedSlots = utils.Bitlist(MAX_HISTORICAL_BLOCK_HASHES);
+    
+    const BeamBlockBody = struct {
+        votes: Mini3SFVotes,
+    };
+    
+    const BeamState = struct {
+        slot: u64,
+        historical_block_hashes: HistoricalBlockHashes,
+        justified_slots: JustifiedSlots,
+    };
+    
+    var votes = try Mini3SFVotes.init(0);
+    try votes.append(Mini3SFVote{
+        .validator_id = 1,
+        .slot = 10,
+        .head = Mini3SFCheckpoint{ .root = [_]u8{1} ** 32, .slot = 10 },
+        .target = Mini3SFCheckpoint{ .root = [_]u8{2} ** 32, .slot = 9 },
+        .source = Mini3SFCheckpoint{ .root = [_]u8{3} ** 32, .slot = 8 },
+    });
+    
+    var hashes = try HistoricalBlockHashes.init(0);
+    try hashes.append([_]u8{0xaa} ** 32);
+    try hashes.append([_]u8{0xbb} ** 32);
+    
+    var bitlist = try JustifiedSlots.init(0);
+    try bitlist.append(true);
+    try bitlist.append(false);
+    try bitlist.append(true);
+    
+    const body = BeamBlockBody{ .votes = votes };
+    const state = BeamState{
+        .slot = 42,
+        .historical_block_hashes = hashes,
+        .justified_slots = bitlist,
+    };
+    
+    var body_hash1: [32]u8 = undefined;
+    var body_hash2: [32]u8 = undefined;
+    var state_hash1: [32]u8 = undefined;
+    var state_hash2: [32]u8 = undefined;
+    
+    try hashTreeRoot(BeamBlockBody, body, &body_hash1, std.testing.allocator);
+    try hashTreeRoot(BeamBlockBody, body, &body_hash2, std.testing.allocator);
+    try hashTreeRoot(BeamState, state, &state_hash1, std.testing.allocator);
+    try hashTreeRoot(BeamState, state, &state_hash2, std.testing.allocator);
+    
+    try expect(std.mem.eql(u8, &body_hash1, &body_hash2));
+    try expect(std.mem.eql(u8, &state_hash1, &state_hash2));
 }
 
 test "zeam stf input" {

@@ -42,6 +42,14 @@ pub fn serializedFixedSize(comptime T: type) !usize {
 // the code serializing of variable-size objects can
 // determine the offset to the next object.
 pub fn serializedSize(comptime T: type, data: T) !usize {
+    // List and Bitlist should use their sszEncode to determine actual size
+    if (comptime isListType(T) or isBitlistType(T)) {
+        var temp_list = ArrayList(u8).init(std.heap.page_allocator);
+        defer temp_list.deinit();
+        try data.sszEncode(&temp_list);
+        return temp_list.items.len;
+    }
+    
     const info = @typeInfo(T);
     return switch (info) {
         .int => @sizeOf(T),

@@ -2,6 +2,7 @@ const libssz = @import("ssz.zig");
 const utils = libssz.utils;
 const serialize = libssz.serialize;
 const deserialize = libssz.deserialize;
+const serializedSize = libssz.serializedSize;
 const chunkCount = libssz.chunkCount;
 const hashTreeRoot = libssz.hashTreeRoot;
 const isFixedSizeObject = libssz.isFixedSizeObject;
@@ -976,6 +977,56 @@ test "List of composite types tree root" {
     try hashTreeRoot(ListOfPastry, pastry_list2, &hash3, std.testing.allocator);
     
     try expect(!std.mem.eql(u8, &hash1, &hash3));
+}
+
+test "serializedSize correctly calculates List/Bitlist sizes" {
+    // Test List size calculation
+    const ListType = utils.List(u64, 100);
+    var list = try ListType.init(0);
+    try list.append(123);
+    try list.append(456);
+    
+    // Verify serializedSize matches actual serialization
+    var serialized = ArrayList(u8).init(std.testing.allocator);
+    defer serialized.deinit();
+    try serialize(ListType, list, &serialized);
+    
+    const calculated_size = try serializedSize(ListType, list);
+    try expect(calculated_size == serialized.items.len);
+    
+    // Test Bitlist size calculation
+    const BitlistType = utils.Bitlist(256);
+    var bitlist = try BitlistType.init(0);
+    try bitlist.append(true);
+    try bitlist.append(false);
+    try bitlist.append(true);
+    
+    var bitlist_serialized = ArrayList(u8).init(std.testing.allocator);
+    defer bitlist_serialized.deinit();
+    try serialize(BitlistType, bitlist, &bitlist_serialized);
+    
+    const bitlist_calculated_size = try serializedSize(BitlistType, bitlist);
+    try expect(bitlist_calculated_size == bitlist_serialized.items.len);
+    
+    // Test struct containing List/Bitlist
+    const StructWithContainers = struct {
+        id: u64,
+        votes: ListType,
+        flags: BitlistType,
+    };
+    
+    const test_struct = StructWithContainers{
+        .id = 42,
+        .votes = list,
+        .flags = bitlist,
+    };
+    
+    var struct_serialized = ArrayList(u8).init(std.testing.allocator);
+    defer struct_serialized.deinit();
+    try serialize(StructWithContainers, test_struct, &struct_serialized);
+    
+    const struct_calculated_size = try serializedSize(StructWithContainers, test_struct);
+    try expect(struct_calculated_size == struct_serialized.items.len);
 }
 
 test "isFixedSizeObject correctly identifies List/Bitlist as variable-size" {

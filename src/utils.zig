@@ -11,6 +11,7 @@ pub fn List(comptime T: type, comptime N: usize) type {
         const Self = @This();
         const Item = T;
         const Inner = std.BoundedArray(T, N);
+        const ssz_type_kind = .list;
 
         inner: Inner,
 
@@ -91,6 +92,7 @@ pub fn Bitlist(comptime N: usize) type {
     return struct {
         const Self = @This();
         const Inner = std.BoundedArray(u8, (N + 7) / 8);
+        const ssz_type_kind = .bitlist;
 
         inner: Inner,
         length: usize,

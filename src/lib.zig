@@ -88,6 +88,12 @@ fn isListType(comptime T: type) bool {
     const type_info = @typeInfo(T);
     if (type_info != .@"struct") return false;
     
+    // Primary: check for explicit SSZ type marker
+    if (@hasDecl(T, "ssz_type_kind")) {
+        return T.ssz_type_kind == .list;
+    }
+    
+    // Fallback: structural detection
     const has_inner = comptime for (type_info.@"struct".fields) |field| {
         if (std.mem.eql(u8, field.name, "inner")) break true;
     } else false;
@@ -104,6 +110,12 @@ fn isBitlistType(comptime T: type) bool {
     const type_info = @typeInfo(T);
     if (type_info != .@"struct") return false;
     
+    // Primary: check for explicit SSZ type marker
+    if (@hasDecl(T, "ssz_type_kind")) {
+        return T.ssz_type_kind == .bitlist;
+    }
+    
+    // Fallback: structural detection
     const has_inner = comptime for (type_info.@"struct".fields) |field| {
         if (std.mem.eql(u8, field.name, "inner")) break true;
     } else false;

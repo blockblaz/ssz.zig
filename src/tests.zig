@@ -1,4 +1,4 @@
-const libssz = @import("lib.zig");
+const libssz = @import("ssz.zig");
 const utils = libssz.utils;
 const serialize = libssz.serialize;
 const deserialize = libssz.deserialize;

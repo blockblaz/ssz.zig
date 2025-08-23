@@ -133,6 +133,11 @@ fn isBitlistType(comptime T: type) bool {
 
 /// Returns true if an object is of fixed size
 pub fn isFixedSizeObject(comptime T: type) !bool {
+    // List and Bitlist are variable-length containers per SSZ spec
+    if (comptime isListType(T) or isBitlistType(T)) {
+        return false;
+    }
+    
     const info = @typeInfo(T);
     switch (info) {
         .bool, .int, .null => return true,

@@ -978,6 +978,23 @@ test "List of composite types tree root" {
     try expect(!std.mem.eql(u8, &hash1, &hash3));
 }
 
+test "isFixedSizeObject correctly identifies List/Bitlist as variable-size" {
+    const ListType = utils.List(u64, 100);
+    const BitlistType = utils.Bitlist(100);
+    
+    // List and Bitlist should be identified as variable-size per SSZ spec
+    try expect(!try isFixedSizeObject(ListType));
+    try expect(!try isFixedSizeObject(BitlistType));
+    
+    // Struct containing List/Bitlist should also be variable-size
+    const StructWithList = struct {
+        id: u64,
+        votes: ListType,
+    };
+    
+    try expect(!try isFixedSizeObject(StructWithList));
+}
+
 test "Zeam-style List/Bitlist usage with tree root stability" {
     const MAX_VALIDATORS = 2048;
     const MAX_HISTORICAL_BLOCK_HASHES = 4096;

@@ -43,13 +43,13 @@ pub fn serializedFixedSize(comptime T: type) !usize {
 // determine the offset to the next object.
 pub fn serializedSize(comptime T: type, data: T) !usize {
     // List and Bitlist should use their sszEncode to determine actual size
-    if (comptime isListType(T) or isBitlistType(T)) {
+    if (comptime utils.isListType(T) or utils.isBitlistType(T)) {
         var temp_list = ArrayList(u8).init(std.heap.page_allocator);
         defer temp_list.deinit();
         try data.sszEncode(&temp_list);
         return temp_list.items.len;
     }
-    
+
     const info = @typeInfo(T);
     return switch (info) {
         .int => @sizeOf(T),
@@ -91,61 +91,13 @@ pub fn serializedSize(comptime T: type, data: T) !usize {
     };
 }
 
-/// Returns true if the type is a utils.List type
-fn isListType(comptime T: type) bool {
-    const type_info = @typeInfo(T);
-    if (type_info != .@"struct") return false;
-    
-    // Primary: check for explicit SSZ type marker
-    if (@hasDecl(T, "ssz_type_kind")) {
-        return T.ssz_type_kind == .list;
-    }
-    
-    // Fallback: structural detection
-    const has_inner = comptime for (type_info.@"struct".fields) |field| {
-        if (std.mem.eql(u8, field.name, "inner")) break true;
-    } else false;
-    
-    return has_inner and
-        std.meta.hasFn(T, "sszEncode") and
-        std.meta.hasFn(T, "sszDecode") and
-        std.meta.hasFn(T, "append") and
-        std.meta.hasFn(T, "slice");
-}
-
-/// Returns true if the type is a utils.Bitlist type
-fn isBitlistType(comptime T: type) bool {
-    const type_info = @typeInfo(T);
-    if (type_info != .@"struct") return false;
-    
-    // Primary: check for explicit SSZ type marker
-    if (@hasDecl(T, "ssz_type_kind")) {
-        return T.ssz_type_kind == .bitlist;
-    }
-    
-    // Fallback: structural detection
-    const has_inner = comptime for (type_info.@"struct".fields) |field| {
-        if (std.mem.eql(u8, field.name, "inner")) break true;
-    } else false;
-    
-    const has_length = comptime for (type_info.@"struct".fields) |field| {
-        if (std.mem.eql(u8, field.name, "length")) break true;
-    } else false;
-    
-    return has_inner and has_length and
-        std.meta.hasFn(T, "sszEncode") and
-        std.meta.hasFn(T, "sszDecode") and
-        std.meta.hasFn(T, "get") and
-        std.meta.hasFn(T, "set");
-}
-
 /// Returns true if an object is of fixed size
 pub fn isFixedSizeObject(comptime T: type) !bool {
     // List and Bitlist are variable-length containers per SSZ spec
-    if (comptime isListType(T) or isBitlistType(T)) {
+    if (comptime utils.isListType(T) or utils.isBitlistType(T)) {
         return false;
     }
-    
+
     const info = @typeInfo(T);
     switch (info) {
         .bool, .int, .null => return true,
@@ -794,13 +746,13 @@ fn packBits(bits: []const bool, l: *ArrayList(u8)) ![]chunk {
 
 fn hashTreeRootList(comptime T: type, value: T, out: *[32]u8, allctr: Allocator) !void {
     const slice = value.constSlice();
-    
+
     if (slice.len == 0) {
         const tmp: chunk = zero_chunk;
         mixInLength2(tmp, 0, out);
         return;
     }
-    
+
     const Item = @TypeOf(slice[0]);
     switch (@typeInfo(Item)) {
         .int => {
@@ -832,27 +784,27 @@ fn hashTreeRootBitlist(comptime T: type, value: T, out: *[32]u8, allctr: Allocat
         mixInLength2(tmp, 0, out);
         return;
     }
-    
+
     var list = ArrayList(u8).init(allctr);
     defer list.deinit();
-    
+
     const byte_slice = value.inner.constSlice();
     const full_bytes = bit_length / 8;
     const remaining_bits = bit_length % 8;
-    
+
     if (full_bytes > 0) {
         try list.appendSlice(byte_slice[0..full_bytes]);
     }
-    
+
     if (remaining_bits > 0) {
         const last_byte = byte_slice[full_bytes];
         const mask = (@as(u8, 1) << @truncate(remaining_bits)) - 1;
         try list.append(last_byte & mask);
     }
-    
+
     const padding_size = (BYTES_PER_CHUNK - list.items.len % BYTES_PER_CHUNK) % BYTES_PER_CHUNK;
     _ = try list.writer().write(zero_chunk[0..padding_size]);
-    
+
     const chunks = std.mem.bytesAsSlice(chunk, list.items);
     var tmp: chunk = undefined;
     try merkleize(sha256, chunks, null, &tmp);
@@ -860,13 +812,13 @@ fn hashTreeRootBitlist(comptime T: type, value: T, out: *[32]u8, allctr: Allocat
 }
 
 pub fn hashTreeRoot(comptime T: type, value: T, out: *[32]u8, allctr: Allocator) !void {
-    if (comptime isListType(T)) {
+    if (comptime utils.isListType(T)) {
         return hashTreeRootList(T, value, out, allctr);
     }
-    if (comptime isBitlistType(T)) {
+    if (comptime utils.isBitlistType(T)) {
         return hashTreeRootBitlist(T, value, out, allctr);
     }
-    
+
     const type_info = @typeInfo(T);
     switch (type_info) {
         .int, .bool => {

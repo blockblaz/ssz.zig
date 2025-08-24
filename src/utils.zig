@@ -5,6 +5,42 @@ const deserialize = lib.deserialize;
 const isFixedSizeObject = lib.isFixedSizeObject;
 const ArrayList = std.ArrayList;
 
+/// Returns true if the type is a utils.List type
+pub fn isListType(comptime T: type) bool {
+    if (@typeInfo(T) != .@"struct") return false;
+
+    // Primary: check for explicit SSZ type marker
+    if (@hasDecl(T, "ssz_type_kind")) {
+        return T.ssz_type_kind == .list;
+    }
+
+    // Fallback: structural check
+    return @hasField(T, "inner") and
+        std.meta.hasFn(T, "sszEncode") and
+        std.meta.hasFn(T, "sszDecode") and
+        std.meta.hasFn(T, "append") and
+        std.meta.hasFn(T, "slice") and
+        !@hasField(T, "length");
+}
+
+/// Returns true if the type is a utils.Bitlist type
+pub fn isBitlistType(comptime T: type) bool {
+    if (@typeInfo(T) != .@"struct") return false;
+
+    // Primary: check for explicit SSZ type marker
+    if (@hasDecl(T, "ssz_type_kind")) {
+        return T.ssz_type_kind == .bitlist;
+    }
+
+    // Fallback: structural check
+    return @hasField(T, "inner") and
+        @hasField(T, "length") and
+        std.meta.hasFn(T, "sszEncode") and
+        std.meta.hasFn(T, "sszDecode") and
+        std.meta.hasFn(T, "get") and
+        std.meta.hasFn(T, "set");
+}
+
 /// Implements the SSZ `List[N]` container.
 pub fn List(comptime T: type, comptime N: usize) type {
     return struct {

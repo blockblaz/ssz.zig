@@ -294,7 +294,7 @@ pub fn hashTreeRootList(comptime T: type, value: T, out: *[32]u8, allctr: Alloca
         return;
     }
 
-    const Item = @TypeOf(slice[0]);
+    const Item = T.Item;
     switch (@typeInfo(Item)) {
         .int => {
             var list = ArrayList(u8).init(allctr);

@@ -120,6 +120,11 @@ pub fn List(comptime T: type, comptime N: usize) type {
         pub fn len(self: *Self) usize {
             return self.inner.len;
         }
+
+        pub fn serializedSize(self: *const Self) !usize {
+            const inner_slice = self.inner.constSlice();
+            return lib.serializedSize(@TypeOf(inner_slice), inner_slice);
+        }
     };
 }
 
@@ -209,6 +214,12 @@ pub fn Bitlist(comptime N: usize) type {
 
         pub fn eql(self: *const Self, other: *Self) bool {
             return (self.length == other.length) and std.mem.eql(u8, self.inner.constSlice()[0..self.inner.len], other.inner.constSlice()[0..other.inner.len]);
+        }
+
+        pub fn serializedSize(self: *const Self) usize {
+            if (self.length == 0) return 0;
+            // Size is number of bytes needed plus one bit for the sentinel
+            return (self.length + 8) / 8;
         }
     };
 }

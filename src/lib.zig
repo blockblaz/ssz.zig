@@ -42,12 +42,9 @@ pub fn serializedFixedSize(comptime T: type) !usize {
 // the code serializing of variable-size objects can
 // determine the offset to the next object.
 pub fn serializedSize(comptime T: type, data: T) !usize {
-    // List and Bitlist should use their sszEncode to determine actual size
-    if (comptime utils.isListType(T) or utils.isBitlistType(T)) {
-        var temp_list = ArrayList(u8).init(std.heap.page_allocator);
-        defer temp_list.deinit();
-        try data.sszEncode(&temp_list);
-        return temp_list.items.len;
+    // Check for custom serializedSize method first
+    if (comptime std.meta.hasFn(T, "serializedSize")) {
+        return data.serializedSize();
     }
 
     const info = @typeInfo(T);

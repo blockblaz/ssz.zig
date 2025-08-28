@@ -17,7 +17,7 @@ const zero_chunk: chunk = [_]u8{0} ** BYTES_PER_CHUNK;
 pub fn isListType(comptime T: type) bool {
     @setEvalBranchQuota(4000);
     if (@typeInfo(T) != .@"struct") return false;
-    
+
     // Check if this is a List type by examining the type name
     return std.mem.indexOf(u8, @typeName(T), "utils.List(") != null;
 }
@@ -26,7 +26,7 @@ pub fn isListType(comptime T: type) bool {
 pub fn isBitlistType(comptime T: type) bool {
     @setEvalBranchQuota(4000);
     if (@typeInfo(T) != .@"struct") return false;
-    
+
     // Check if this is a Bitlist type by examining the type name
     return std.mem.indexOf(u8, @typeName(T), "utils.Bitlist(") != null;
 }

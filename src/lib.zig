@@ -10,7 +10,7 @@ const hashes_of_zero = @import("./zeros.zig").hashes_of_zero;
 const Allocator = std.mem.Allocator;
 
 /// Number of bytes per chunk.
-pub const BYTES_PER_CHUNK = 32;
+const BYTES_PER_CHUNK = 32;
 
 /// Number of bytes per serialized length offset.
 const BYTES_PER_LENGTH_OFFSET = 4;
@@ -502,6 +502,16 @@ pub fn deserialize(comptime T: type, serialized: []const u8, out: *T, allocator:
     }
 }
 
+pub fn mixInLength2(root: [32]u8, length: usize, out: *[32]u8) void {
+    var hasher = sha256.init(sha256.Options{});
+    hasher.update(root[0..]);
+
+    var tmp = [_]u8{0} ** 32;
+    std.mem.writeInt(@TypeOf(length), tmp[0..@sizeOf(@TypeOf(length))], length, std.builtin.Endian.little);
+    hasher.update(tmp[0..]);
+    hasher.final(out[0..]);
+}
+
 fn mixInLength(root: [32]u8, length: [32]u8, out: *[32]u8) void {
     var hasher = sha256.init(sha256.Options{});
     hasher.update(root[0..]);
@@ -563,8 +573,154 @@ pub fn chunkCount(comptime T: type) usize {
     }
 }
 
-pub const chunk = [BYTES_PER_CHUNK]u8;
-pub const zero_chunk: chunk = [_]u8{0} ** BYTES_PER_CHUNK;
+const chunk = [BYTES_PER_CHUNK]u8;
+const zero_chunk: chunk = [_]u8{0} ** BYTES_PER_CHUNK;
+
+pub fn pack(comptime T: type, values: T, l: *ArrayList(u8)) ![]chunk {
+    try serialize(T, values, l);
+    const padding_size = (BYTES_PER_CHUNK - l.items.len % BYTES_PER_CHUNK) % BYTES_PER_CHUNK;
+    _ = try l.writer().write(zero_chunk[0..padding_size]);
+    return std.mem.bytesAsSlice(chunk, l.items);
+}
+
+test "pack u32" {
+    var expected: [32]u8 = undefined;
+    var list = ArrayList(u8).init(std.testing.allocator);
+    defer list.deinit();
+    const out = try pack(u32, 0xdeadbeef, &list);
+
+    _ = try std.fmt.hexToBytes(expected[0..], "efbeadde00000000000000000000000000000000000000000000000000000000");
+
+    try std.testing.expect(std.mem.eql(u8, out[0][0..], expected[0..]));
+}
+
+test "pack bool" {
+    var expected: [32]u8 = undefined;
+    var list = ArrayList(u8).init(std.testing.allocator);
+    defer list.deinit();
+    const out = try pack(bool, true, &list);
+
+    _ = try std.fmt.hexToBytes(expected[0..], "0100000000000000000000000000000000000000000000000000000000000000");
+
+    try std.testing.expect(std.mem.eql(u8, out[0][0..], expected[0..]));
+}
+
+test "pack string" {
+    var expected: [128]u8 = undefined;
+    var list = ArrayList(u8).init(std.testing.allocator);
+    defer list.deinit();
+    const out = try pack([]const u8, "a" ** 100, &list);
+
+    _ = try std.fmt.hexToBytes(expected[0..], "6161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616100000000000000000000000000000000000000000000000000000000");
+
+    try std.testing.expect(expected.len == out.len * out[0].len);
+    try std.testing.expect(std.mem.eql(u8, out[0][0..], expected[0..32]));
+    try std.testing.expect(std.mem.eql(u8, out[1][0..], expected[32..64]));
+    try std.testing.expect(std.mem.eql(u8, out[2][0..], expected[64..96]));
+    try std.testing.expect(std.mem.eql(u8, out[3][0..], expected[96..]));
+}
+
+// merkleize recursively calculates the root hash of a Merkle tree.
+pub fn merkleize(hasher: type, chunks: []chunk, limit: ?usize, out: *[32]u8) anyerror!void {
+    // Calculate the number of chunks to be padded, check the limit
+    if (limit != null and chunks.len > limit.?) {
+        return error.ChunkSizeExceedsLimit;
+    }
+    const power = limit orelse chunks.len;
+    const size = if (power > 0) try std.math.ceilPowerOfTwo(usize, power) else 0;
+
+    // Perform the merkelization
+    switch (size) {
+        0 => std.mem.copyForwards(u8, out.*[0..], zero_chunk[0..]),
+        1 => std.mem.copyForwards(u8, out.*[0..], chunks[0][0..]),
+        else => {
+            // Merkleize the left side. If the number of chunks
+            // isn't enough to fill the entire width, complete
+            // with zeroes.
+            var digest = hasher.init(hasher.Options{});
+            var buf: [32]u8 = undefined;
+            const split = if (size / 2 < chunks.len) size / 2 else chunks.len;
+            try merkleize(hasher, chunks[0..split], size / 2, &buf);
+            digest.update(buf[0..]);
+
+            // Merkleize the right side. If the number of chunks only
+            // covers the first half, directly input the hashed zero-
+            // filled subtrie.
+            if (size / 2 < chunks.len) {
+                try merkleize(hasher, chunks[size / 2 ..], size / 2, &buf);
+                digest.update(buf[0..]);
+            } else digest.update(hashes_of_zero[size / 2 - 1][0..]);
+            digest.final(out);
+        },
+    }
+}
+
+test "merkleize an empty slice" {
+    var list = ArrayList(u8).init(std.testing.allocator);
+    defer list.deinit();
+    const chunks = &[0][32]u8{};
+    var out: [32]u8 = undefined;
+    try merkleize(sha256, chunks, null, &out);
+    try std.testing.expect(std.mem.eql(u8, out[0..], zero_chunk[0..]));
+}
+
+test "merkleize a string" {
+    var list = ArrayList(u8).init(std.testing.allocator);
+    defer list.deinit();
+    const chunks = try pack([]const u8, "a" ** 100, &list);
+    var out: [32]u8 = undefined;
+    try merkleize(sha256, chunks, null, &out);
+    // Build the expected tree
+    const leaf1 = [_]u8{0x61} ** 32; // "0xaaaaa....aa" 32 times
+    var leaf2: [32]u8 = [_]u8{0x61} ** 4 ++ [_]u8{0} ** 28;
+    var root: [32]u8 = undefined;
+    var internal_left: [32]u8 = undefined;
+    var internal_right: [32]u8 = undefined;
+    var hasher = sha256.init(sha256.Options{});
+    hasher.update(leaf1[0..]);
+    hasher.update(leaf1[0..]);
+    hasher.final(&internal_left);
+    hasher = sha256.init(sha256.Options{});
+    hasher.update(leaf1[0..]);
+    hasher.update(leaf2[0..]);
+    hasher.final(&internal_right);
+    hasher = sha256.init(sha256.Options{});
+    hasher.update(internal_left[0..]);
+    hasher.update(internal_right[0..]);
+    hasher.final(&root);
+
+    try std.testing.expect(std.mem.eql(u8, out[0..], root[0..]));
+}
+
+test "merkleize a boolean" {
+    var list = ArrayList(u8).init(std.testing.allocator);
+    defer list.deinit();
+
+    var chunks = try pack(bool, false, &list);
+    var expected = [_]u8{0} ** BYTES_PER_CHUNK;
+    var out: [BYTES_PER_CHUNK]u8 = undefined;
+    try merkleize(sha256, chunks, null, &out);
+
+    try std.testing.expect(std.mem.eql(u8, out[0..], expected[0..]));
+
+    var list2 = ArrayList(u8).init(std.testing.allocator);
+    defer list2.deinit();
+
+    chunks = try pack(bool, true, &list2);
+    expected[0] = 1;
+    try merkleize(sha256, chunks, null, &out);
+    try std.testing.expect(std.mem.eql(u8, out[0..], expected[0..]));
+}
+
+test "merkleize a bytes16 vector with one element" {
+    var list = ArrayList(u8).init(std.testing.allocator);
+    defer list.deinit();
+    _ = try pack([16]u8, [_]u8{0xaa} ** 16, &list);
+    // var expected: [32]u8 = [_]u8{0xaa} ** 16 ++ [_]u8{0x00} ** 16;
+    // var out: [32]u8 = undefined;
+    // try merkleize(sha256, chunks, null, &out);
+    // try std.testing.expect(std.mem.eql(u8, out[0..], expected[0..]));
+}
 
 fn packBits(bits: []const bool, l: *ArrayList(u8)) ![]chunk {
     var byte: u8 = 0;
@@ -598,8 +754,8 @@ pub fn hashTreeRoot(comptime T: type, value: T, out: *[32]u8, allctr: Allocator)
         .int, .bool => {
             var list = ArrayList(u8).init(allctr);
             defer list.deinit();
-            const chunks = try utils.pack(T, value, &list);
-            try utils.merkleize(sha256, chunks, null, out);
+            const chunks = try pack(T, value, &list);
+            try merkleize(sha256, chunks, null, out);
         },
         .array => |a| {
             // Check if the child is a basic type. If so, return
@@ -610,14 +766,14 @@ pub fn hashTreeRoot(comptime T: type, value: T, out: *[32]u8, allctr: Allocator)
                 .int => {
                     var list = ArrayList(u8).init(allctr);
                     defer list.deinit();
-                    const chunks = try utils.pack(T, value, &list);
-                    try utils.merkleize(sha256, chunks, null, out);
+                    const chunks = try pack(T, value, &list);
+                    try merkleize(sha256, chunks, null, out);
                 },
                 .bool => {
                     var list = ArrayList(u8).init(allctr);
                     defer list.deinit();
                     const chunks = try packBits(value[0..], &list);
-                    try utils.merkleize(sha256, chunks, chunkCount(T), out);
+                    try merkleize(sha256, chunks, chunkCount(T), out);
                 },
                 .array => {
                     var chunks = ArrayList(chunk).init(allctr);
@@ -627,7 +783,7 @@ pub fn hashTreeRoot(comptime T: type, value: T, out: *[32]u8, allctr: Allocator)
                         try hashTreeRoot(@TypeOf(item), item, &tmp, allctr);
                         try chunks.append(tmp);
                     }
-                    try utils.merkleize(sha256, chunks.items, null, out);
+                    try merkleize(sha256, chunks.items, null, out);
                 },
                 else => return error.NotSupported,
             }
@@ -640,10 +796,10 @@ pub fn hashTreeRoot(comptime T: type, value: T, out: *[32]u8, allctr: Allocator)
                         .int => {
                             var list = ArrayList(u8).init(allctr);
                             defer list.deinit();
-                            const chunks = try utils.pack(T, value, &list);
+                            const chunks = try pack(T, value, &list);
                             var tmp: chunk = undefined;
-                            try utils.merkleize(sha256, chunks, null, &tmp);
-                            utils.mixInLength2(tmp, value.len, out);
+                            try merkleize(sha256, chunks, null, &tmp);
+                            mixInLength2(tmp, value.len, out);
                         },
                         // use bitlist
                         .bool => return error.UnSupportedPointerType,
@@ -656,8 +812,8 @@ pub fn hashTreeRoot(comptime T: type, value: T, out: *[32]u8, allctr: Allocator)
                                 try hashTreeRoot(@TypeOf(item), item, &tmp, allctr);
                                 try chunks.append(tmp);
                             }
-                            try utils.merkleize(sha256, chunks.items, null, &tmp);
-                            utils.mixInLength2(tmp, chunks.items.len, out);
+                            try merkleize(sha256, chunks.items, null, &tmp);
+                            mixInLength2(tmp, chunks.items.len, out);
                         },
                     }
                 },
@@ -672,7 +828,7 @@ pub fn hashTreeRoot(comptime T: type, value: T, out: *[32]u8, allctr: Allocator)
                 try hashTreeRoot(f.type, @field(value, f.name), &tmp, allctr);
                 try chunks.append(tmp);
             }
-            try utils.merkleize(sha256, chunks.items, null, out);
+            try merkleize(sha256, chunks.items, null, out);
         },
         // An optional is a union with `None` as first value.
         .optional => |opt| if (value != null) {

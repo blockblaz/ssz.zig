@@ -15,38 +15,20 @@ const zero_chunk: chunk = [_]u8{0} ** BYTES_PER_CHUNK;
 
 /// Returns true if the type is a utils.List type
 pub fn isListType(comptime T: type) bool {
+    @setEvalBranchQuota(4000);
     if (@typeInfo(T) != .@"struct") return false;
-
-    // Primary: check for explicit SSZ type marker
-    if (@hasDecl(T, "ssz_type_kind")) {
-        return T.ssz_type_kind == .list;
-    }
-
-    // Fallback: structural check
-    return @hasField(T, "inner") and
-        std.meta.hasFn(T, "sszEncode") and
-        std.meta.hasFn(T, "sszDecode") and
-        std.meta.hasFn(T, "append") and
-        std.meta.hasFn(T, "slice") and
-        !@hasField(T, "length");
+    
+    // Check if this is a List type by examining the type name
+    return std.mem.indexOf(u8, @typeName(T), "utils.List(") != null;
 }
 
 /// Returns true if the type is a utils.Bitlist type
 pub fn isBitlistType(comptime T: type) bool {
+    @setEvalBranchQuota(4000);
     if (@typeInfo(T) != .@"struct") return false;
-
-    // Primary: check for explicit SSZ type marker
-    if (@hasDecl(T, "ssz_type_kind")) {
-        return T.ssz_type_kind == .bitlist;
-    }
-
-    // Fallback: structural check
-    return @hasField(T, "inner") and
-        @hasField(T, "length") and
-        std.meta.hasFn(T, "sszEncode") and
-        std.meta.hasFn(T, "sszDecode") and
-        std.meta.hasFn(T, "get") and
-        std.meta.hasFn(T, "set");
+    
+    // Check if this is a Bitlist type by examining the type name
+    return std.mem.indexOf(u8, @typeName(T), "utils.Bitlist(") != null;
 }
 
 /// Implements the SSZ `List[N]` container.
@@ -55,7 +37,6 @@ pub fn List(comptime T: type, comptime N: usize) type {
         const Self = @This();
         const Item = T;
         const Inner = std.BoundedArray(T, N);
-        const ssz_type_kind = .list;
 
         inner: Inner,
 
@@ -141,7 +122,6 @@ pub fn Bitlist(comptime N: usize) type {
     return struct {
         const Self = @This();
         const Inner = std.BoundedArray(u8, (N + 7) / 8);
-        const ssz_type_kind = .bitlist;
 
         inner: Inner,
         length: usize,

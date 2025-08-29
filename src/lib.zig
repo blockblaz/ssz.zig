@@ -742,11 +742,9 @@ fn packBits(bits: []const bool, l: *ArrayList(u8)) ![]chunk {
 }
 
 pub fn hashTreeRoot(comptime T: type, value: T, out: *[32]u8, allctr: Allocator) !void {
-    if (comptime utils.isListType(T)) {
-        return utils.hashTreeRootList(T, value, out, allctr);
-    }
-    if (comptime utils.isBitlistType(T)) {
-        return utils.hashTreeRootBitlist(T, value, out, allctr);
+    // Check if type has its own hashTreeRoot method at compile time
+    if (comptime std.meta.hasFn(T, "hashTreeRoot")) {
+        return value.hashTreeRoot(out, allctr);
     }
 
     const type_info = @typeInfo(T);

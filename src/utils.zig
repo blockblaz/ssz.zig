@@ -117,6 +117,38 @@ pub fn List(comptime T: type, comptime N: usize) type {
             const inner_slice = self.inner.constSlice();
             return lib.serializedSize(@TypeOf(inner_slice), inner_slice);
         }
+
+        pub fn hashTreeRoot(self: *const Self, out: *[32]u8, allctr: Allocator) !void {
+            const items = self.constSlice();
+
+            if (items.len == 0) {
+                const tmp: chunk = zero_chunk;
+                lib.mixInLength2(tmp, 0, out);
+                return;
+            }
+
+            switch (@typeInfo(Item)) {
+                .int => {
+                    var list = ArrayList(u8).init(allctr);
+                    defer list.deinit();
+                    const chunks = try lib.pack([]const Item, items, &list);
+                    var tmp: chunk = undefined;
+                    try lib.merkleize(sha256, chunks, null, &tmp);
+                    lib.mixInLength2(tmp, items.len, out);
+                },
+                else => {
+                    var chunks = ArrayList(chunk).init(allctr);
+                    defer chunks.deinit();
+                    var tmp: chunk = undefined;
+                    for (items) |item| {
+                        try lib.hashTreeRoot(Item, item, &tmp, allctr);
+                        try chunks.append(tmp);
+                    }
+                    try lib.merkleize(sha256, chunks.items, null, &tmp);
+                    lib.mixInLength2(tmp, items.len, out);
+                },
+            }
+        }
     };
 }
 
@@ -212,76 +244,39 @@ pub fn Bitlist(comptime N: usize) type {
             // Size is number of bytes needed plus one bit for the sentinel
             return (self.length + 7) / 8;
         }
-    };
-}
 
-/// Specialized hash tree root function for List types
-/// Implements the required mix_in_length operation for variable-length containers
-pub fn hashTreeRootList(comptime T: type, value: T, out: *[32]u8, allctr: Allocator) !void {
-    const slice = value.constSlice();
+        pub fn hashTreeRoot(self: *const Self, out: *[32]u8, allctr: Allocator) !void {
+            const bit_length = self.length;
+            if (bit_length == 0) {
+                const tmp: chunk = zero_chunk;
+                lib.mixInLength2(tmp, 0, out);
+                return;
+            }
 
-    if (slice.len == 0) {
-        const tmp: chunk = zero_chunk;
-        lib.mixInLength2(tmp, 0, out);
-        return;
-    }
-
-    const Item = T.Item;
-    switch (@typeInfo(Item)) {
-        .int => {
             var list = ArrayList(u8).init(allctr);
             defer list.deinit();
-            const chunks = try lib.pack([]const Item, slice, &list);
+
+            const byte_slice = self.inner.constSlice();
+            const full_bytes = bit_length / 8;
+            const remaining_bits = bit_length % 8;
+
+            if (full_bytes > 0) {
+                try list.appendSlice(byte_slice[0..full_bytes]);
+            }
+
+            if (remaining_bits > 0) {
+                const last_byte = byte_slice[full_bytes];
+                const mask = (@as(u8, 1) << @truncate(remaining_bits)) - 1;
+                try list.append(last_byte & mask);
+            }
+
+            const padding_size = (BYTES_PER_CHUNK - list.items.len % BYTES_PER_CHUNK) % BYTES_PER_CHUNK;
+            _ = try list.writer().write(zero_chunk[0..padding_size]);
+
+            const chunks = std.mem.bytesAsSlice(chunk, list.items);
             var tmp: chunk = undefined;
             try lib.merkleize(sha256, chunks, null, &tmp);
-            lib.mixInLength2(tmp, slice.len, out);
-        },
-        else => {
-            var chunks = ArrayList(chunk).init(allctr);
-            defer chunks.deinit();
-            var tmp: chunk = undefined;
-            for (slice) |item| {
-                try lib.hashTreeRoot(Item, item, &tmp, allctr);
-                try chunks.append(tmp);
-            }
-            try lib.merkleize(sha256, chunks.items, null, &tmp);
-            lib.mixInLength2(tmp, slice.len, out);
-        },
-    }
-}
-
-/// Specialized hash tree root function for Bitlist types
-/// Implements the required mix_in_length operation for variable-length containers
-pub fn hashTreeRootBitlist(comptime T: type, value: T, out: *[32]u8, allctr: Allocator) !void {
-    const bit_length = value.length;
-    if (bit_length == 0) {
-        const tmp: chunk = zero_chunk;
-        lib.mixInLength2(tmp, 0, out);
-        return;
-    }
-
-    var list = ArrayList(u8).init(allctr);
-    defer list.deinit();
-
-    const byte_slice = value.inner.constSlice();
-    const full_bytes = bit_length / 8;
-    const remaining_bits = bit_length % 8;
-
-    if (full_bytes > 0) {
-        try list.appendSlice(byte_slice[0..full_bytes]);
-    }
-
-    if (remaining_bits > 0) {
-        const last_byte = byte_slice[full_bytes];
-        const mask = (@as(u8, 1) << @truncate(remaining_bits)) - 1;
-        try list.append(last_byte & mask);
-    }
-
-    const padding_size = (BYTES_PER_CHUNK - list.items.len % BYTES_PER_CHUNK) % BYTES_PER_CHUNK;
-    _ = try list.writer().write(zero_chunk[0..padding_size]);
-
-    const chunks = std.mem.bytesAsSlice(chunk, list.items);
-    var tmp: chunk = undefined;
-    try lib.merkleize(sha256, chunks, null, &tmp);
-    lib.mixInLength2(tmp, bit_length, out);
+            lib.mixInLength2(tmp, bit_length, out);
+        }
+    };
 }

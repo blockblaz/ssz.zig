@@ -1,5 +1,8 @@
 const std = @import("std");
 const lib = @import("./lib.zig");
+
+// Zig compiler configuration
+const EVAL_BRANCH_QUOTA = 4000;
 const serialize = lib.serialize;
 const deserialize = lib.deserialize;
 const isFixedSizeObject = lib.isFixedSizeObject;
@@ -15,7 +18,7 @@ const zero_chunk: chunk = [_]u8{0} ** BYTES_PER_CHUNK;
 
 /// Returns true if the type is a utils.List type
 pub fn isListType(comptime T: type) bool {
-    @setEvalBranchQuota(4000);
+    @setEvalBranchQuota(EVAL_BRANCH_QUOTA);
     if (@typeInfo(T) != .@"struct") return false;
 
     // Check if this is a List type by examining the type name
@@ -24,7 +27,7 @@ pub fn isListType(comptime T: type) bool {
 
 /// Returns true if the type is a utils.Bitlist type
 pub fn isBitlistType(comptime T: type) bool {
-    @setEvalBranchQuota(4000);
+    @setEvalBranchQuota(EVAL_BRANCH_QUOTA);
     if (@typeInfo(T) != .@"struct") return false;
 
     // Check if this is a Bitlist type by examining the type name

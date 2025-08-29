@@ -1,9 +1,38 @@
 const std = @import("std");
 const lib = @import("./lib.zig");
+
+// Zig compiler configuration
+const EVAL_BRANCH_QUOTA = 4000;
 const serialize = lib.serialize;
 const deserialize = lib.deserialize;
 const isFixedSizeObject = lib.isFixedSizeObject;
 const ArrayList = std.ArrayList;
+const Allocator = std.mem.Allocator;
+const sha256 = std.crypto.hash.sha2.Sha256;
+const hashes_of_zero = @import("./zeros.zig").hashes_of_zero;
+
+// SSZ specification constants
+const BYTES_PER_CHUNK = 32;
+const chunk = [BYTES_PER_CHUNK]u8;
+const zero_chunk: chunk = [_]u8{0} ** BYTES_PER_CHUNK;
+
+/// Returns true if the type is a utils.List type
+pub fn isListType(comptime T: type) bool {
+    @setEvalBranchQuota(EVAL_BRANCH_QUOTA);
+    if (@typeInfo(T) != .@"struct") return false;
+
+    // Check if this is a List type by examining the type name
+    return std.mem.indexOf(u8, @typeName(T), "utils.List(") != null;
+}
+
+/// Returns true if the type is a utils.Bitlist type
+pub fn isBitlistType(comptime T: type) bool {
+    @setEvalBranchQuota(EVAL_BRANCH_QUOTA);
+    if (@typeInfo(T) != .@"struct") return false;
+
+    // Check if this is a Bitlist type by examining the type name
+    return std.mem.indexOf(u8, @typeName(T), "utils.Bitlist(") != null;
+}
 
 /// Implements the SSZ `List[N]` container.
 pub fn List(comptime T: type, comptime N: usize) type {
@@ -64,6 +93,10 @@ pub fn List(comptime T: type, comptime N: usize) type {
             return self.inner.slice();
         }
 
+        pub fn constSlice(self: *const Self) []const T {
+            return self.inner.constSlice();
+        }
+
         pub fn fromSlice(m: []const T) error{Overflow}!Self {
             return .{ .inner = try Inner.fromSlice(m) };
         }
@@ -78,6 +111,43 @@ pub fn List(comptime T: type, comptime N: usize) type {
 
         pub fn len(self: *Self) usize {
             return self.inner.len;
+        }
+
+        pub fn serializedSize(self: *const Self) !usize {
+            const inner_slice = self.inner.constSlice();
+            return lib.serializedSize(@TypeOf(inner_slice), inner_slice);
+        }
+
+        pub fn hashTreeRoot(self: *const Self, out: *[32]u8, allctr: Allocator) !void {
+            const items = self.constSlice();
+
+            if (items.len == 0) {
+                const tmp: chunk = zero_chunk;
+                lib.mixInLength2(tmp, 0, out);
+                return;
+            }
+
+            switch (@typeInfo(Item)) {
+                .int => {
+                    var list = ArrayList(u8).init(allctr);
+                    defer list.deinit();
+                    const chunks = try lib.pack([]const Item, items, &list);
+                    var tmp: chunk = undefined;
+                    try lib.merkleize(sha256, chunks, null, &tmp);
+                    lib.mixInLength2(tmp, items.len, out);
+                },
+                else => {
+                    var chunks = ArrayList(chunk).init(allctr);
+                    defer chunks.deinit();
+                    var tmp: chunk = undefined;
+                    for (items) |item| {
+                        try lib.hashTreeRoot(Item, item, &tmp, allctr);
+                        try chunks.append(tmp);
+                    }
+                    try lib.merkleize(sha256, chunks.items, null, &tmp);
+                    lib.mixInLength2(tmp, items.len, out);
+                },
+            }
         }
     };
 }
@@ -167,6 +237,46 @@ pub fn Bitlist(comptime N: usize) type {
 
         pub fn eql(self: *const Self, other: *Self) bool {
             return (self.length == other.length) and std.mem.eql(u8, self.inner.constSlice()[0..self.inner.len], other.inner.constSlice()[0..other.inner.len]);
+        }
+
+        pub fn serializedSize(self: *const Self) usize {
+            if (self.length == 0) return 0;
+            // Size is number of bytes needed plus one bit for the sentinel
+            return (self.length + 7) / 8;
+        }
+
+        pub fn hashTreeRoot(self: *const Self, out: *[32]u8, allctr: Allocator) !void {
+            const bit_length = self.length;
+            if (bit_length == 0) {
+                const tmp: chunk = zero_chunk;
+                lib.mixInLength2(tmp, 0, out);
+                return;
+            }
+
+            var list = ArrayList(u8).init(allctr);
+            defer list.deinit();
+
+            const byte_slice = self.inner.constSlice();
+            const full_bytes = bit_length / 8;
+            const remaining_bits = bit_length % 8;
+
+            if (full_bytes > 0) {
+                try list.appendSlice(byte_slice[0..full_bytes]);
+            }
+
+            if (remaining_bits > 0) {
+                const last_byte = byte_slice[full_bytes];
+                const mask = (@as(u8, 1) << @truncate(remaining_bits)) - 1;
+                try list.append(last_byte & mask);
+            }
+
+            const padding_size = (BYTES_PER_CHUNK - list.items.len % BYTES_PER_CHUNK) % BYTES_PER_CHUNK;
+            _ = try list.writer().write(zero_chunk[0..padding_size]);
+
+            const chunks = std.mem.bytesAsSlice(chunk, list.items);
+            var tmp: chunk = undefined;
+            try lib.merkleize(sha256, chunks, null, &tmp);
+            lib.mixInLength2(tmp, bit_length, out);
         }
     };
 }

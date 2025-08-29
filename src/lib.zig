@@ -42,6 +42,11 @@ pub fn serializedFixedSize(comptime T: type) !usize {
 // the code serializing of variable-size objects can
 // determine the offset to the next object.
 pub fn serializedSize(comptime T: type, data: T) !usize {
+    // Check for custom serializedSize method first for List types
+    if (comptime std.meta.hasFn(T, "serializedSize")) {
+        return data.serializedSize();
+    }
+
     const info = @typeInfo(T);
     return switch (info) {
         .int => @sizeOf(T),
@@ -85,6 +90,11 @@ pub fn serializedSize(comptime T: type, data: T) !usize {
 
 /// Returns true if an object is of fixed size
 pub fn isFixedSizeObject(comptime T: type) !bool {
+    // List and Bitlist are variable-length containers
+    if (comptime utils.isListType(T) or utils.isBitlistType(T)) {
+        return false;
+    }
+
     const info = @typeInfo(T);
     switch (info) {
         .bool, .int, .null => return true,
@@ -492,7 +502,7 @@ pub fn deserialize(comptime T: type, serialized: []const u8, out: *T, allocator:
     }
 }
 
-fn mixInLength2(root: [32]u8, length: usize, out: *[32]u8) void {
+pub fn mixInLength2(root: [32]u8, length: usize, out: *[32]u8) void {
     var hasher = sha256.init(sha256.Options{});
     hasher.update(root[0..]);
 
@@ -566,7 +576,7 @@ pub fn chunkCount(comptime T: type) usize {
 const chunk = [BYTES_PER_CHUNK]u8;
 const zero_chunk: chunk = [_]u8{0} ** BYTES_PER_CHUNK;
 
-fn pack(comptime T: type, values: T, l: *ArrayList(u8)) ![]chunk {
+pub fn pack(comptime T: type, values: T, l: *ArrayList(u8)) ![]chunk {
     try serialize(T, values, l);
     const padding_size = (BYTES_PER_CHUNK - l.items.len % BYTES_PER_CHUNK) % BYTES_PER_CHUNK;
     _ = try l.writer().write(zero_chunk[0..padding_size]);
@@ -732,6 +742,11 @@ fn packBits(bits: []const bool, l: *ArrayList(u8)) ![]chunk {
 }
 
 pub fn hashTreeRoot(comptime T: type, value: T, out: *[32]u8, allctr: Allocator) !void {
+    // Check if type has its own hashTreeRoot method at compile time
+    if (comptime std.meta.hasFn(T, "hashTreeRoot")) {
+        return value.hashTreeRoot(out, allctr);
+    }
+
     const type_info = @typeInfo(T);
     switch (type_info) {
         .int, .bool => {

@@ -42,7 +42,7 @@ pub fn serializedFixedSize(comptime T: type) !usize {
 // the code serializing of variable-size objects can
 // determine the offset to the next object.
 pub fn serializedSize(comptime T: type, data: T) !usize {
-    // Check for custom serializedSize method first
+    // Check for custom serializedSize method first for List types
     if (comptime std.meta.hasFn(T, "serializedSize")) {
         return data.serializedSize();
     }

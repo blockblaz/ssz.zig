@@ -90,9 +90,8 @@ pub fn serializedSize(comptime T: type, data: T) !usize {
 
 /// Returns true if an object is of fixed size
 pub fn isFixedSizeObject(comptime T: type) !bool {
-    // List and Bitlist are variable-length containers
-    if (comptime utils.isListType(T) or utils.isBitlistType(T)) {
-        return false;
+    if (comptime std.meta.hasFn(T, "isFixedSizeObject")) {
+        return T.isFixedSizeObject();
     }
 
     const info = @typeInfo(T);

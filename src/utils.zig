@@ -2,7 +2,6 @@ const std = @import("std");
 const lib = @import("./lib.zig");
 
 // Zig compiler configuration
-const EVAL_BRANCH_QUOTA = 4000;
 const serialize = lib.serialize;
 const deserialize = lib.deserialize;
 const isFixedSizeObject = lib.isFixedSizeObject;
@@ -15,24 +14,6 @@ const hashes_of_zero = @import("./zeros.zig").hashes_of_zero;
 const BYTES_PER_CHUNK = 32;
 const chunk = [BYTES_PER_CHUNK]u8;
 const zero_chunk: chunk = [_]u8{0} ** BYTES_PER_CHUNK;
-
-/// Returns true if the type is a utils.List type
-pub fn isListType(comptime T: type) bool {
-    @setEvalBranchQuota(EVAL_BRANCH_QUOTA);
-    if (@typeInfo(T) != .@"struct") return false;
-
-    // Check if this is a List type by examining the type name
-    return std.mem.indexOf(u8, @typeName(T), "utils.List(") != null;
-}
-
-/// Returns true if the type is a utils.Bitlist type
-pub fn isBitlistType(comptime T: type) bool {
-    @setEvalBranchQuota(EVAL_BRANCH_QUOTA);
-    if (@typeInfo(T) != .@"struct") return false;
-
-    // Check if this is a Bitlist type by examining the type name
-    return std.mem.indexOf(u8, @typeName(T), "utils.Bitlist(") != null;
-}
 
 /// Implements the SSZ `List[N]` container.
 pub fn List(comptime T: type, comptime N: usize) type {
@@ -47,11 +28,15 @@ pub fn List(comptime T: type, comptime N: usize) type {
             try serialize([]const Item, self.inner.slice(), l);
         }
 
+        pub fn isFixedSizeObject() bool {
+            return false;
+        }
+
         pub fn sszDecode(serialized: []const u8, out: *Self, allocator: ?std.mem.Allocator) !void {
             // BitList[N] or regular List[N]?
             if (Self.Item == bool) {
                 @panic("Use the optimized utils.Bitlist(N) instead of utils.List(bool, N)");
-            } else if (try isFixedSizeObject(Self.Item)) {
+            } else if (try lib.isFixedSizeObject(Self.Item)) {
                 const pitch = try lib.serializedSize(Self.Item, undefined);
                 const n_items = serialized.len / pitch;
                 for (0..n_items) |i| {
@@ -202,6 +187,10 @@ pub fn Bitlist(comptime N: usize) type {
                 try out.*.append(last_byte & 1 == 1);
                 last_byte >>= 1;
             }
+        }
+
+        pub fn isFixedSizeObject() bool {
+            return false;
         }
 
         pub fn init(length: usize) error{Overflow}!Self {

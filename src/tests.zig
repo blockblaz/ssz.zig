@@ -1,4 +1,4 @@
-const libssz = @import("ssz.zig");
+const libssz = @import("lib.zig");
 const utils = libssz.utils;
 const serialize = libssz.serialize;
 const deserialize = libssz.deserialize;
@@ -10,7 +10,7 @@ const std = @import("std");
 const ArrayList = std.ArrayList;
 const expect = std.testing.expect;
 const sha256 = std.crypto.hash.sha2.Sha256;
-const hashes_of_zero = @import("./zeros.zig").hashes_of_zero;
+const hashes_of_zero = libssz.zeros.hashes_of_zero;
 
 test "serializes uint8" {
     const data: u8 = 0x55;

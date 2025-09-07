@@ -262,6 +262,12 @@ const strs = [_][]const u8{
 pub const hashes_of_zero: [256][32]u8 = calc: {
     @setEvalBranchQuota(100000);
     var ret: [256][32]u8 = undefined;
+
+    // Initialize index 0 with the zero chunk (32 zero bytes)
+    // This represents a single zero leaf in the merkle tree
+    ret[0] = [_]u8{0} ** 32;
+
+    // Initialize indices 1-255 from the precomputed strings
     var i = 1;
     while (i < 256) : (i += 1) {
         _ = std.fmt.hexToBytes(ret[i][0..], strs[i - 1]) catch @panic("could not convert hash of zero");

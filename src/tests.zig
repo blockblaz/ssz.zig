@@ -1238,3 +1238,39 @@ test "zeam stf input" {
     try expect(std.mem.eql(u8, &prover_input.state.lastest_finalized.root, &prover_input_deserialized.state.lastest_finalized.root));
     try expect(std.mem.eql(u8, prover_input.state.justifications_validators, prover_input_deserialized.state.justifications_validators));
 }
+
+// Test uint64 serialization and deserialization
+test "serializes uint64" {
+    const data: u64 = 0x1122334455667788;
+    const serialized_data = [_]u8{ 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11 };
+
+    var list = ArrayList(u8).init(std.testing.allocator);
+    defer list.deinit();
+    try serialize(u64, data, &list);
+    try expect(std.mem.eql(u8, list.items, serialized_data[0..]));
+}
+
+test "deserializes uint64" {
+    const data = [_]u8{ 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11 };
+    var result: u64 = undefined;
+    try deserialize(u64, data[0..], &result, std.testing.allocator);
+    try expect(result == 0x1122334455667788);
+}
+
+// Test edge cases for integers
+test "serialize max/min integer values" {
+    // Max u64
+    const max_u64: u64 = std.math.maxInt(u64);
+    var list = ArrayList(u8).init(std.testing.allocator);
+    defer list.deinit();
+    try serialize(u64, max_u64, &list);
+    try expect(list.items.len == 8);
+    try expect(std.mem.eql(u8, list.items, &[_]u8{0xFF} ** 8));
+    
+    // Min i64 (most negative)
+    const min_i64: i64 = std.math.minInt(i64);
+    var list2 = ArrayList(u8).init(std.testing.allocator);
+    defer list2.deinit();
+    try serialize(i64, min_i64, &list2);
+    try expect(list2.items.len == 8);
+}

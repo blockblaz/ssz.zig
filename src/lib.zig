@@ -630,7 +630,7 @@ pub fn merkleize(hasher: type, chunks: []chunk, limit: ?usize, out: *[32]u8) any
 
     // Perform the merkelization
     switch (size) {
-        0 => std.mem.copyForwards(u8, out.*[0..], zero_chunk[0..]),
+        0 => std.mem.copyForwards(u8, out.*[0..], hashes_of_zero[0][0..]),
         1 => std.mem.copyForwards(u8, out.*[0..], chunks[0][0..]),
         else => {
             // Merkleize the left side. If the number of chunks
@@ -648,7 +648,16 @@ pub fn merkleize(hasher: type, chunks: []chunk, limit: ?usize, out: *[32]u8) any
             if (size / 2 < chunks.len) {
                 try merkleize(hasher, chunks[size / 2 ..], size / 2, &buf);
                 digest.update(buf[0..]);
-            } else digest.update(hashes_of_zero[size / 2 - 1][0..]);
+            } else {
+                // Use depth-based indexing for zero hashes
+                // For a subtree of size/2 leaves, we need the zero hash at depth log2(size/2)
+                // hashes_of_zero[0] = single zero chunk (depth 0)
+                // hashes_of_zero[1] = hash of 2 zero chunks (depth 1)
+                // hashes_of_zero[d] = hash of 2^d zero chunks (depth d)
+                const subtree_size = size / 2;
+                const depth = std.math.log2_int(usize, subtree_size);
+                digest.update(hashes_of_zero[depth][0..]);
+            }
             digest.final(out);
         },
     }

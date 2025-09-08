@@ -17,6 +17,11 @@ const zero_chunk: chunk = [_]u8{0} ** BYTES_PER_CHUNK;
 
 /// Implements the SSZ `List[N]` container.
 pub fn List(comptime T: type, comptime N: usize) type {
+    // Compile-time check: List[bool, N] is not allowed, use Bitlist[N] instead
+    if (T == bool) {
+        @compileError("List[bool, N] is not supported. Use Bitlist(" ++ std.fmt.comptimePrint("{}", .{N}) ++ ") instead for boolean lists.");
+    }
+
     return struct {
         const Self = @This();
         const Item = T;

@@ -117,8 +117,12 @@ pub fn List(comptime T: type, comptime N: usize) type {
                     var list = ArrayList(u8).init(allctr);
                     defer list.deinit();
                     const chunks = try lib.pack([]const Item, items, &list);
+
+                    const bytes_per_item = @sizeOf(Item);
+                    const items_per_chunk = BYTES_PER_CHUNK / bytes_per_item;
+                    const chunks_for_max_capacity = (N + items_per_chunk - 1) / items_per_chunk;
                     var tmp: chunk = undefined;
-                    try lib.merkleize(sha256, chunks, null, &tmp);
+                    try lib.merkleize(sha256, chunks, chunks_for_max_capacity, &tmp);
                     lib.mixInLength2(tmp, items.len, out);
                 },
                 else => {
@@ -129,7 +133,7 @@ pub fn List(comptime T: type, comptime N: usize) type {
                         try lib.hashTreeRoot(Item, item, &tmp, allctr);
                         try chunks.append(tmp);
                     }
-                    try lib.merkleize(sha256, chunks.items, null, &tmp);
+                    try lib.merkleize(sha256, chunks.items, N, &tmp);
                     lib.mixInLength2(tmp, items.len, out);
                 },
             }

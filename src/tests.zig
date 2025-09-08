@@ -1268,7 +1268,7 @@ test "serialize max/min integer values" {
     try serialize(u64, max_u64, &list);
     try expect(list.items.len == 8);
     try expect(std.mem.eql(u8, list.items, &[_]u8{0xFF} ** 8));
-    
+
     // Min i64 (most negative)
     const min_i64: i64 = std.math.minInt(i64);
     var list2 = ArrayList(u8).init(std.testing.allocator);

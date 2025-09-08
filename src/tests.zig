@@ -903,12 +903,14 @@ test "List tree root calculation" {
     try list_with_items.append(42);
     try list_with_items.append(123);
     try list_with_items.append(456);
+    const list_with_items_expected = [_]u8{ 0x2e, 0xe6, 0xa2, 0x1f, 0xa8, 0x67, 0x42, 0xfc, 0xef, 0x87, 0x55, 0x7d, 0x48, 0xfe, 0x37, 0x11, 0x9f, 0x94, 0x56, 0xe1, 0xcc, 0x14, 0x37, 0x76, 0x0f, 0x4e, 0x9d, 0x6d, 0xba, 0x84, 0xbe, 0x01 };
 
     var empty_hash: [32]u8 = undefined;
     var filled_hash: [32]u8 = undefined;
 
     try hashTreeRoot(ListU64, empty_list, &empty_hash, std.testing.allocator);
     try hashTreeRoot(ListU64, list_with_items, &filled_hash, std.testing.allocator);
+    try expect(std.mem.eql(u8, &filled_hash, &list_with_items_expected));
 
     try expect(!std.mem.eql(u8, &empty_hash, &filled_hash));
 
@@ -1273,4 +1275,231 @@ test "serialize max/min integer values" {
     defer list2.deinit();
     try serialize(i64, min_i64, &list2);
     try expect(list2.items.len == 8);
+}
+
+test "Empty List hash tree root" {
+    const ListU32 = utils.List(u32, 100);
+    const empty_list = try ListU32.init(0);
+
+    var hash: [32]u8 = undefined;
+    try hashTreeRoot(ListU32, empty_list, &hash, std.testing.allocator);
+
+    const zig_expected = [_]u8{
+        0xf5, 0xa5, 0xfd, 0x42, 0xd1, 0x6a, 0x20, 0x30,
+        0x27, 0x98, 0xef, 0x6e, 0xd3, 0x09, 0x97, 0x9b,
+        0x43, 0x00, 0x3d, 0x23, 0x20, 0xd9, 0xf0, 0xe8,
+        0xea, 0x98, 0x31, 0xa9, 0x27, 0x59, 0xfb, 0x4b,
+    };
+    try expect(std.mem.eql(u8, &hash, &zig_expected));
+}
+
+test "List at maximum capacity" {
+    const ListU8 = utils.List(u8, 4);
+    var full_list = try ListU8.init(0);
+
+    // Fill to capacity
+    try full_list.append(1);
+    try full_list.append(2);
+    try full_list.append(3);
+    try full_list.append(4);
+
+    // Should fail to add more
+    try std.testing.expectError(error.Overflow, full_list.append(5));
+
+    // Test hash tree root at capacity
+    var hash: [32]u8 = undefined;
+    try hashTreeRoot(ListU8, full_list, &hash, std.testing.allocator);
+
+    // Python reference: List[uint8, 4] with [1,2,3,4]
+    const expected = [_]u8{
+        0x95, 0xc1, 0xf6, 0x30, 0xb7, 0xa8, 0x42, 0x8b,
+        0x56, 0xd5, 0x1d, 0xa4, 0xdf, 0xae, 0xce, 0x95,
+        0x19, 0x67, 0xa7, 0x03, 0x59, 0x68, 0x22, 0x2f,
+        0xfb, 0x56, 0x0e, 0x7c, 0x78, 0xcd, 0x42, 0x35,
+    };
+    try expect(std.mem.eql(u8, &hash, &expected));
+}
+
+test "Array hash tree root" {
+    const data: [4]u32 = .{ 1, 2, 3, 4 };
+
+    var hash: [32]u8 = undefined;
+    try hashTreeRoot([4]u32, data, &hash, std.testing.allocator);
+
+    // Python reference: Vector[uint32, 4] with [1,2,3,4]
+    // For basic types packed in one chunk, hash is the serialized data
+    const expected = [_]u8{
+        0x01, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00,
+        0x03, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    };
+    try expect(std.mem.eql(u8, &hash, &expected));
+}
+
+test "Large Bitvector serialization and hash" {
+    const LargeBitvec = [512]bool;
+    var data: LargeBitvec = [_]bool{false} ** 512;
+
+    // Set some bits
+    data[0] = true;
+    data[255] = true;
+    data[256] = true;
+    data[511] = true;
+
+    var list = ArrayList(u8).init(std.testing.allocator);
+    defer list.deinit();
+    try serialize(LargeBitvec, data, &list);
+
+    // Should be 512/8 = 64 bytes
+    try expect(list.items.len == 64);
+
+    // Check specific bits are set (little-endian bit ordering for serialize)
+    try expect(list.items[0] & 0x01 == 0x01); // bit 0 -> LSB of byte 0
+    try expect(list.items[31] & 0x80 == 0x80); // bit 255 -> MSB of byte 31
+    try expect(list.items[32] & 0x01 == 0x01); // bit 256 -> LSB of byte 32
+    try expect(list.items[63] & 0x80 == 0x80); // bit 511 -> MSB of byte 63
+
+    // Test hash tree root
+    var hash: [32]u8 = undefined;
+    try hashTreeRoot(LargeBitvec, data, &hash, std.testing.allocator);
+    const expected = [_]u8{
+        0x1d, 0x83, 0x09, 0x11, 0x4a, 0xfe, 0xf7, 0x14,
+        0x89, 0xbe, 0x68, 0xd4, 0x5e, 0x18, 0xc3, 0x39,
+        0x1f, 0x6e, 0x93, 0x05, 0xb4, 0x57, 0x20, 0x0d,
+        0xdc, 0x82, 0xe4, 0x3c, 0x0d, 0x78, 0x35, 0x35,
+    };
+    try expect(std.mem.eql(u8, &hash, &expected));
+}
+
+test "Bitlist edge cases" {
+    const TestBitlist = utils.Bitlist(100);
+
+    // All false
+    var all_false = try TestBitlist.init(0);
+    for (0..50) |_| {
+        try all_false.append(false);
+    }
+
+    var hash1: [32]u8 = undefined;
+    try hashTreeRoot(TestBitlist, all_false, &hash1, std.testing.allocator);
+
+    const expected_false = [_]u8{
+        0x02, 0xc8, 0xc1, 0x5f, 0xed, 0x3f, 0x1b, 0x86,
+        0xb5, 0xd7, 0x88, 0x0d, 0xe1, 0xfc, 0xbf, 0x45,
+        0x12, 0x89, 0x85, 0xc4, 0xf4, 0xb5, 0x49, 0xac,
+        0x89, 0x61, 0xcc, 0x39, 0x0d, 0x51, 0x97, 0x2f,
+    };
+    try expect(std.mem.eql(u8, &hash1, &expected_false));
+
+    // All true
+    var all_true = try TestBitlist.init(0);
+    for (0..50) |_| {
+        try all_true.append(true);
+    }
+
+    var hash2: [32]u8 = undefined;
+    try hashTreeRoot(TestBitlist, all_true, &hash2, std.testing.allocator);
+
+    // Python reference: Bitlist[100] with 50 true bits
+    const expected_true = [_]u8{
+        0xa9, 0x85, 0xe0, 0x62, 0x05, 0x71, 0xe7, 0x45,
+        0x15, 0xfd, 0x9e, 0xc7, 0x0b, 0x4e, 0xa5, 0x15,
+        0x66, 0x3c, 0x55, 0xe0, 0x52, 0xad, 0x24, 0x7f,
+        0xc1, 0xf6, 0xdd, 0xe5, 0xe1, 0xe7, 0x0e, 0x67,
+    };
+    try expect(std.mem.eql(u8, &hash2, &expected_true));
+}
+
+test "uint256 hash tree root" {
+    const data: u256 = 0x0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF;
+
+    var hash: [32]u8 = undefined;
+    try hashTreeRoot(u256, data, &hash, std.testing.allocator);
+    const expected = [_]u8{
+        0xEF, 0xCD, 0xAB, 0x89, 0x67, 0x45, 0x23, 0x01,
+        0xEF, 0xCD, 0xAB, 0x89, 0x67, 0x45, 0x23, 0x01,
+        0xEF, 0xCD, 0xAB, 0x89, 0x67, 0x45, 0x23, 0x01,
+        0xEF, 0xCD, 0xAB, 0x89, 0x67, 0x45, 0x23, 0x01,
+    };
+    try expect(std.mem.eql(u8, &hash, &expected));
+}
+
+test "Single element List" {
+    const ListU64 = utils.List(u64, 10);
+    var single = try ListU64.init(0);
+    try single.append(42);
+
+    var hash: [32]u8 = undefined;
+    try hashTreeRoot(ListU64, single, &hash, std.testing.allocator);
+
+    const expected = [_]u8{
+        0x54, 0xd7, 0x76, 0x7c, 0xc1, 0xdd, 0xd2, 0xf6,
+        0x66, 0x8d, 0xcd, 0x00, 0x0c, 0x78, 0xb9, 0xfe,
+        0x37, 0xf9, 0x9d, 0x66, 0x2c, 0xfc, 0x5a, 0xc2,
+        0x9c, 0x30, 0xfb, 0x0b, 0xb1, 0x28, 0xb1, 0xbc,
+    };
+    try expect(std.mem.eql(u8, &hash, &expected));
+}
+
+test "Nested structure hash tree root" {
+    const Inner = struct {
+        a: u32,
+        b: u64,
+    };
+
+    const Outer = struct {
+        x: Inner,
+        y: u16,
+        z: Inner,
+    };
+
+    const data = Outer{
+        .x = Inner{ .a = 1, .b = 2 },
+        .y = 3,
+        .z = Inner{ .a = 4, .b = 5 },
+    };
+
+    var hash: [32]u8 = undefined;
+    try hashTreeRoot(Outer, data, &hash, std.testing.allocator);
+
+    const expected = [_]u8{
+        0x4e, 0xbe, 0x9c, 0x7f, 0x41, 0x63, 0xd9, 0x34,
+        0xc1, 0x7a, 0x88, 0xa1, 0x38, 0x31, 0x10, 0xce,
+        0xac, 0x60, 0x50, 0x5b, 0x84, 0xea, 0xf5, 0x1f,
+        0x81, 0xcb, 0xce, 0x0c, 0xe1, 0x9f, 0xc0, 0x43,
+    };
+    try expect(std.mem.eql(u8, &hash, &expected));
+}
+
+test "serialize negative i8 and i16" {
+    const val_i8: i8 = -42;
+    var list = ArrayList(u8).init(std.testing.allocator);
+    defer list.deinit();
+    try serialize(i8, val_i8, &list);
+    try expect(list.items.len == 1);
+    try expect(list.items[0] == 0xD6); // Two's complement of -42
+
+    const val_i16: i16 = -1000;
+    var list2 = ArrayList(u8).init(std.testing.allocator);
+    defer list2.deinit();
+    try serialize(i16, val_i16, &list2);
+    try expect(list2.items.len == 2);
+    // -1000 in two's complement is 0xFC18
+    try expect(list2.items[0] == 0x18);
+    try expect(list2.items[1] == 0xFC);
+}
+
+test "Zero-length array" {
+    const empty: [0]u32 = .{};
+
+    var list = ArrayList(u8).init(std.testing.allocator);
+    defer list.deinit();
+    try serialize([0]u32, empty, &list);
+    try expect(list.items.len == 0);
+
+    var hash: [32]u8 = undefined;
+    try hashTreeRoot([0]u32, empty, &hash, std.testing.allocator);
+    // Should be the zero chunk
+    try expect(std.mem.eql(u8, &hash, &([_]u8{0} ** 32)));
 }

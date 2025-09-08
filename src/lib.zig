@@ -3,10 +3,11 @@
 
 const std = @import("std");
 pub const utils = @import("./utils.zig");
+pub const zeros = @import("./zeros.zig");
 const ArrayList = std.ArrayList;
 const builtin = std.builtin;
 const sha256 = std.crypto.hash.sha2.Sha256;
-const hashes_of_zero = @import("./zeros.zig").hashes_of_zero;
+const hashes_of_zero = zeros.hashes_of_zero;
 const Allocator = std.mem.Allocator;
 
 /// Number of bytes per chunk.

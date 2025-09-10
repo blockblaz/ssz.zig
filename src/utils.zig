@@ -44,22 +44,31 @@ pub fn List(comptime T: type, comptime N: usize) type {
             } else if (try lib.isFixedSizeObject(Self.Item)) {
                 const pitch = try lib.serializedSize(Self.Item, undefined);
                 const n_items = serialized.len / pitch;
+
+                // Validate list size against maximum N
+                if (n_items > N) {
+                    return lib.SSZError.ListTooBig;
+                }
+
                 for (0..n_items) |i| {
                     var item: Self.Item = undefined;
                     try deserialize(Self.Item, serialized[i * pitch .. (i + 1) * pitch], &item, allocator);
                     try out.append(item);
                 }
             } else {
-                // first variable index is also the size of the list
-                // of indices. Recast that list as a []const u32.
-                const size = std.mem.readInt(u32, serialized[0..4], std.builtin.Endian.little) / @sizeOf(u32);
+                // Validate and decode dynamic list length
+                const size = try lib.decodeDynamicLength(serialized, N);
+
                 const indices = std.mem.bytesAsSlice(u32, serialized[0 .. size * 4]);
                 var i = @as(usize, 0);
                 while (i < size) : (i += 1) {
                     const end = if (i < size - 1) indices[i + 1] else serialized.len;
                     const start = indices[i];
                     if (start >= serialized.len or end > serialized.len) {
-                        return error.IndexOutOfBounds;
+                        return lib.SSZError.OffsetExceedsSize;
+                    }
+                    if (i > 0 and start < indices[i - 1]) {
+                        return lib.SSZError.OffsetOrdering;
                     }
                     const item = try out.inner.addOne();
                     try deserialize(Self.Item, serialized[start..end], item, allocator);
@@ -170,21 +179,20 @@ pub fn Bitlist(comptime N: usize) type {
 
         pub fn sszDecode(serialized: []const u8, out: *Self, _: ?std.mem.Allocator) !void {
             out.* = try init(0);
+            
+            // Comprehensive validation (handles empty, trailing zero, size limits)
+            try lib.validateBitlist(serialized, N);
+            
+            // If validation passed but buffer is empty, we're done
             if (serialized.len == 0) {
                 return;
             }
 
-            // determine where the last bit is
+            // Parse the bit structure (validation already confirmed it's valid)
             const byte_len = serialized.len - 1;
             var last_byte = serialized[byte_len];
             var bit_len: usize = 8;
-            if (last_byte == 0) {
-                return error.InvalidEncoding;
-            }
             while (last_byte & @shlExact(@as(usize, 1), @truncate(bit_len)) == 0) : (bit_len -= 1) {}
-            if (bit_len + 8 * byte_len > N) {
-                return error.InvalidEncoding;
-            }
 
             // insert all full bytes
             try out.*.inner.insertSlice(0, serialized[0..byte_len]);

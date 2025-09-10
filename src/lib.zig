@@ -55,6 +55,61 @@ const BYTES_PER_CHUNK = 32;
 /// Number of bytes per serialized length offset.
 const BYTES_PER_LENGTH_OFFSET = 4;
 
+/// Validates that the bitlist is correctly formed
+pub fn validateBitlist(buf: []const u8, bit_limit: u64) SSZError!void {
+    const byte_len = buf.len;
+    if (byte_len == 0) {
+        return SSZError.BitlistEmpty;
+    }
+    
+    // Maximum possible bytes in a bitlist with provided bitlimit.
+    const max_bytes = (bit_limit >> 3) + 1;
+    if (byte_len > max_bytes) {
+        return SSZError.BitlistTooManyBytes;
+    }
+    
+    // The most significant bit is present in the last byte in the array.
+    const last = buf[byte_len - 1];
+    if (last == 0) {
+        return SSZError.BitlistTrailingByteZero;
+    }
+    
+    // Determine the position of the most significant bit.
+    // Find most significant bit position
+    const msb_pos = if (last == 0) 0 else 8 - @clz(last);
+    
+    // The absolute position of the most significant bit will be the number of
+    // bits in the preceding bytes plus the position of the most significant
+    // bit. Subtract this value by 1 to determine the length of the bitlist.
+    const num_of_bits: u64 = @intCast(8 * (byte_len - 1) + msb_pos - 1);
+    
+    if (num_of_bits > bit_limit) {
+        return SSZError.BitlistTooManyBits;
+    }
+}
+
+/// Decodes and validates the length from dynamic input
+pub fn decodeDynamicLength(buf: []const u8, max_size: u32) SSZError!u32 {
+    if (buf.len == 0) {
+        return 0;
+    }
+    if (buf.len < 4) {
+        return SSZError.DynamicLengthTooShort;
+    }
+    
+    const offset = std.mem.readInt(u32, buf[0..4], std.builtin.Endian.little);
+    if (offset % BYTES_PER_LENGTH_OFFSET != 0 or offset == 0) {
+        return SSZError.DynamicLengthNotOffsetSized;
+    }
+    
+    const length = offset / BYTES_PER_LENGTH_OFFSET;
+    if (length > max_size) {
+        return SSZError.DynamicLengthExceedsMax;
+    }
+    
+    return length;
+}
+
 pub fn serializedFixedSize(comptime T: type) !usize {
     const info = @typeInfo(T);
     return switch (info) {

@@ -10,6 +10,45 @@ const sha256 = std.crypto.hash.sha2.Sha256;
 const hashes_of_zero = zeros.hashes_of_zero;
 const Allocator = std.mem.Allocator;
 
+// SSZ validation error types
+pub const SSZError = error{
+    // Offset validation errors
+    OffsetExceedsSize,           // offset exceeds size of buffer
+    OffsetOrdering,              // offset is less than previous offset
+    InvalidVariableOffset,       // invalid ssz encoding. first variable element offset indexes into fixed value data
+    
+    // Dynamic length validation errors
+    DynamicLengthTooShort,       // buffer too small to hold an offset
+    DynamicLengthNotOffsetSized, // list offsets must be multiples of the offset size (4)
+    DynamicLengthExceedsMax,     // list length longer than ssz max length for the type
+    
+    // Bitlist validation errors
+    BitlistEmpty,                // bitlist empty, it does not have length bit
+    BitlistTrailingByteZero,     // trailing byte is zero (missing delimiter bit)
+    BitlistTooManyBits,          // too many bits
+    BitlistTooManyBytes,         // unexpected number of bytes
+    
+    // General validation errors
+    InvalidEncoding,             // invalid encoding
+    Size,                        // incorrect size
+    BytesLength,                 // bytes array does not have the correct length
+    VectorLength,               // vector does not have the correct length
+    ListTooBig,                 // list length is higher than max value
+    
+    // Existing errors to maintain compatibility
+    IndexOutOfBounds,
+    Overflow,
+    NoSerializedFixedSizeAvailable,
+    NoSerializedSizeAvailable,
+    UnknownType,
+    InvalidSerializedIntLengthType,
+    UnSupportedPointerType,
+    UnionIsNotTagged,
+    NotImplemented,
+    NotSupported,
+    ChunkSizeExceedsLimit,
+};
+
 /// Number of bytes per chunk.
 const BYTES_PER_CHUNK = 32;
 
@@ -341,7 +380,10 @@ pub fn deserialize(comptime T: type, serialized: []const u8, out: *T, allocator:
                         const end = if (i < size - 1) indices[i + 1] else serialized.len;
                         const start = indices[i];
                         if (start >= serialized.len or end > serialized.len) {
-                            return error.IndexOutOfBounds;
+                            return SSZError.OffsetExceedsSize;
+                        }
+                        if (i > 0 and start < indices[i - 1]) {
+                            return SSZError.OffsetOrdering;
                         }
                         try deserialize(U, serialized[start..end], &out[i], allocator);
                     }

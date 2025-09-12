@@ -179,10 +179,10 @@ pub fn Bitlist(comptime N: usize) type {
 
         pub fn sszDecode(serialized: []const u8, out: *Self, _: ?std.mem.Allocator) !void {
             out.* = try init(0);
-            
+
             // Comprehensive validation (handles empty, trailing zero, size limits)
             try lib.validateBitlist(serialized, N);
-            
+
             // If validation passed but buffer is empty, we're done
             if (serialized.len == 0) {
                 return;

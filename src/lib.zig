@@ -19,6 +19,7 @@ pub fn serializedFixedSize(comptime T: type) !usize {
     const info = @typeInfo(T);
     return switch (info) {
         .int => @sizeOf(T),
+        .bool => @sizeOf(T),
         .array => info.array.len * try serializedFixedSize(info.array.child),
         .pointer => switch (info.pointer.size) {
             .slice => error.NoSerializedFixedSizeAvailable,

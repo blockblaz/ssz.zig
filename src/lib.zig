@@ -13,28 +13,28 @@ const Allocator = std.mem.Allocator;
 // SSZ validation error types
 pub const SSZError = error{
     // Offset validation errors
-    OffsetExceedsSize,           // offset exceeds size of buffer
-    OffsetOrdering,              // offset is less than previous offset
-    InvalidVariableOffset,       // invalid ssz encoding. first variable element offset indexes into fixed value data
-    
+    OffsetExceedsSize, // offset exceeds size of buffer
+    OffsetOrdering, // offset is less than previous offset
+    InvalidVariableOffset, // invalid ssz encoding. first variable element offset indexes into fixed value data
+
     // Dynamic length validation errors
-    DynamicLengthTooShort,       // buffer too small to hold an offset
+    DynamicLengthTooShort, // buffer too small to hold an offset
     DynamicLengthNotOffsetSized, // list offsets must be multiples of the offset size (4)
-    DynamicLengthExceedsMax,     // list length longer than ssz max length for the type
-    
+    DynamicLengthExceedsMax, // list length longer than ssz max length for the type
+
     // Bitlist validation errors
-    BitlistEmpty,                // bitlist empty, it does not have length bit
-    BitlistTrailingByteZero,     // trailing byte is zero (missing delimiter bit)
-    BitlistTooManyBits,          // too many bits
-    BitlistTooManyBytes,         // unexpected number of bytes
-    
+    BitlistEmpty, // bitlist empty, it does not have length bit
+    BitlistTrailingByteZero, // trailing byte is zero (missing delimiter bit)
+    BitlistTooManyBits, // too many bits
+    BitlistTooManyBytes, // unexpected number of bytes
+
     // General validation errors
-    InvalidEncoding,             // invalid encoding
-    Size,                        // incorrect size
-    BytesLength,                 // bytes array does not have the correct length
-    VectorLength,               // vector does not have the correct length
-    ListTooBig,                 // list length is higher than max value
-    
+    InvalidEncoding, // invalid encoding
+    Size, // incorrect size
+    BytesLength, // bytes array does not have the correct length
+    VectorLength, // vector does not have the correct length
+    ListTooBig, // list length is higher than max value
+
     // Existing errors to maintain compatibility
     IndexOutOfBounds,
     Overflow,
@@ -61,28 +61,28 @@ pub fn validateBitlist(buf: []const u8, bit_limit: u64) SSZError!void {
     if (byte_len == 0) {
         return SSZError.BitlistEmpty;
     }
-    
+
     // Maximum possible bytes in a bitlist with provided bitlimit.
     const max_bytes = (bit_limit >> 3) + 1;
     if (byte_len > max_bytes) {
         return SSZError.BitlistTooManyBytes;
     }
-    
+
     // The most significant bit is present in the last byte in the array.
     const last = buf[byte_len - 1];
     if (last == 0) {
         return SSZError.BitlistTrailingByteZero;
     }
-    
+
     // Determine the position of the most significant bit.
     // Find most significant bit position
     const msb_pos = if (last == 0) 0 else 8 - @clz(last);
-    
+
     // The absolute position of the most significant bit will be the number of
     // bits in the preceding bytes plus the position of the most significant
     // bit. Subtract this value by 1 to determine the length of the bitlist.
     const num_of_bits: u64 = @intCast(8 * (byte_len - 1) + msb_pos - 1);
-    
+
     if (num_of_bits > bit_limit) {
         return SSZError.BitlistTooManyBits;
     }
@@ -96,17 +96,17 @@ pub fn decodeDynamicLength(buf: []const u8, max_size: u32) SSZError!u32 {
     if (buf.len < 4) {
         return SSZError.DynamicLengthTooShort;
     }
-    
+
     const offset = std.mem.readInt(u32, buf[0..4], std.builtin.Endian.little);
     if (offset % BYTES_PER_LENGTH_OFFSET != 0 or offset == 0) {
         return SSZError.DynamicLengthNotOffsetSized;
     }
-    
+
     const length = offset / BYTES_PER_LENGTH_OFFSET;
     if (length > max_size) {
         return SSZError.DynamicLengthExceedsMax;
     }
-    
+
     return length;
 }
 

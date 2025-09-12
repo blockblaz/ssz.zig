@@ -377,7 +377,7 @@ pub fn deserialize(comptime T: type, serialized: []const u8, out: *T, allocator:
                 }
             } else {
                 if (try isFixedSizeObject(ptr.child)) {
-                    const pitch = try serializedSize(ptr.child, undefined);
+                    const pitch = try serializedFixedSize(ptr.child);
                     const n_items = serialized.len / pitch;
                     if (allocator) |alloc| {
                         out.* = try alloc.alloc(ptr.child, n_items);

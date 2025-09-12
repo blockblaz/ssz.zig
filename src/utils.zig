@@ -42,7 +42,7 @@ pub fn List(comptime T: type, comptime N: usize) type {
             if (Self.Item == bool) {
                 @panic("Use the optimized utils.Bitlist(N) instead of utils.List(bool, N)");
             } else if (try lib.isFixedSizeObject(Self.Item)) {
-                const pitch = try lib.serializedSize(Self.Item, undefined);
+                const pitch = try lib.serializedFixedSize(Self.Item);
                 const n_items = serialized.len / pitch;
                 for (0..n_items) |i| {
                     var item: Self.Item = undefined;

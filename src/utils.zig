@@ -99,7 +99,7 @@ pub fn List(comptime T: type, comptime N: usize) type {
             self.inner.set(i, item);
         }
 
-        pub fn len(self: *Self) usize {
+        pub fn len(self: *const Self) usize {
             return self.inner.len;
         }
 
@@ -229,7 +229,7 @@ pub fn Bitlist(comptime N: usize) type {
             self.set(self.length - 1, item);
         }
 
-        pub fn len(self: *Self) usize {
+        pub fn len(self: *const Self) usize {
             return if (self.length > N) N else self.length;
         }
 

@@ -51,6 +51,7 @@ pub fn serializedSize(comptime T: type, data: T) !usize {
     const info = @typeInfo(T);
     return switch (info) {
         .int => @sizeOf(T),
+        .bool => @sizeOf(T),
         .array => size: {
             var size: usize = 0;
             for (0..data.len) |i| {

@@ -158,3 +158,88 @@ test "List[Validator] serialization and hash tree root" {
     // Hash should be the same for original and deserialized lists
     try expect(std.mem.eql(u8, &hash1, &hash2));
 }
+
+// BeamBlockBody types for testing
+const MAX_VALIDATORS_IN_BLOCK = 50;
+const ValidatorArray = utils.List(Validator, MAX_VALIDATORS_IN_BLOCK);
+const BeamBlockBody = struct {
+    validators: ValidatorArray,
+};
+
+test "BeamBlockBody with validator array - full cycle" {
+    // Create test validators
+    const validator1 = Validator{
+        .pubkey = [_]u8{0x01} ** 48,
+        .withdrawal_credentials = [_]u8{0x11} ** 32,
+        .effective_balance = 32000000000,
+        .slashed = false,
+        .activation_eligibility_epoch = 0,
+        .activation_epoch = 0,
+        .exit_epoch = 18446744073709551615,
+        .withdrawable_epoch = 18446744073709551615,
+    };
+
+    const validator2 = Validator{
+        .pubkey = [_]u8{0x02} ** 48,
+        .withdrawal_credentials = [_]u8{0x22} ** 32,
+        .effective_balance = 31000000000,
+        .slashed = true,
+        .activation_eligibility_epoch = 1,
+        .activation_epoch = 2,
+        .exit_epoch = 100,
+        .withdrawable_epoch = 200,
+    };
+
+    // Create validator array
+    var validators = try ValidatorArray.init(0);
+    try validators.append(validator1);
+    try validators.append(validator2);
+
+    // Create BeamBlockBody
+    const beam_block_body = BeamBlockBody{
+        .validators = validators,
+    };
+
+    // Test serialization
+    var serialized_data = ArrayList(u8).init(std.testing.allocator);
+    defer serialized_data.deinit();
+    try serialize(BeamBlockBody, beam_block_body, &serialized_data);
+
+    // Test deserialization
+    var deserialized_body: BeamBlockBody = undefined;
+    deserialized_body.validators = try ValidatorArray.init(0);
+    try deserialize(BeamBlockBody, serialized_data.items, &deserialized_body, null);
+
+    // Verify deserialization correctness
+    try expect(beam_block_body.validators.len() == deserialized_body.validators.len());
+    try expect(beam_block_body.validators.len() == 2);
+
+    for (0..beam_block_body.validators.len()) |i| {
+        const orig = beam_block_body.validators.get(i);
+        const deser = deserialized_body.validators.get(i);
+
+        try expect(std.mem.eql(u8, &orig.pubkey, &deser.pubkey));
+        try expect(std.mem.eql(u8, &orig.withdrawal_credentials, &deser.withdrawal_credentials));
+        try expect(orig.effective_balance == deser.effective_balance);
+        try expect(orig.slashed == deser.slashed);
+        try expect(orig.activation_eligibility_epoch == deser.activation_eligibility_epoch);
+        try expect(orig.activation_epoch == deser.activation_epoch);
+        try expect(orig.exit_epoch == deser.exit_epoch);
+        try expect(orig.withdrawable_epoch == deser.withdrawable_epoch);
+    }
+
+    // Test hash tree root consistency
+    var hash_original: [32]u8 = undefined;
+    try hashTreeRoot(BeamBlockBody, beam_block_body, &hash_original, std.testing.allocator);
+
+    var hash_deserialized: [32]u8 = undefined;
+    try hashTreeRoot(BeamBlockBody, deserialized_body, &hash_deserialized, std.testing.allocator);
+
+    // Hashes should be identical for original and deserialized data
+    try expect(std.mem.eql(u8, &hash_original, &hash_deserialized));
+
+    // Test hash determinism
+    var hash_duplicate: [32]u8 = undefined;
+    try hashTreeRoot(BeamBlockBody, beam_block_body, &hash_duplicate, std.testing.allocator);
+    try expect(std.mem.eql(u8, &hash_original, &hash_duplicate));
+}

@@ -1,4 +1,4 @@
-const libssz = @import("ssz.zig");
+const libssz = @import("lib.zig");
 const utils = libssz.utils;
 const serialize = libssz.serialize;
 const deserialize = libssz.deserialize;
@@ -10,6 +10,7 @@ const std = @import("std");
 const ArrayList = std.ArrayList;
 const expect = std.testing.expect;
 const sha256 = std.crypto.hash.sha2.Sha256;
+const hashes_of_zero = libssz.zeros.hashes_of_zero;
 
 test "serializes uint8" {
     const data: u8 = 0x55;
@@ -539,7 +540,7 @@ test "calculate the root hash of a boolean" {
     try hashTreeRoot(bool, true, &hashed, std.testing.allocator);
     try expect(std.mem.eql(u8, hashed[0..], expected[0..]));
 
-    expected = [_]u8{0} ** 32;
+    expected = hashes_of_zero[0];
     try hashTreeRoot(bool, false, &hashed, std.testing.allocator);
     try expect(std.mem.eql(u8, hashed[0..], expected[0..]));
 }

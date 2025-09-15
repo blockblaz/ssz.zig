@@ -10,105 +10,8 @@ const sha256 = std.crypto.hash.sha2.Sha256;
 const hashes_of_zero = zeros.hashes_of_zero;
 const Allocator = std.mem.Allocator;
 
-// SSZ validation error types
-pub const SSZError = error{
-    // Offset validation errors
-    OffsetExceedsSize, // offset exceeds size of buffer
-    OffsetOrdering, // offset is less than previous offset
-    InvalidVariableOffset, // invalid ssz encoding. first variable element offset indexes into fixed value data
-
-    // Dynamic length validation errors
-    DynamicLengthTooShort, // buffer too small to hold an offset
-    DynamicLengthNotOffsetSized, // list offsets must be multiples of the offset size (4)
-    DynamicLengthExceedsMax, // list length longer than ssz max length for the type
-
-    // Bitlist validation errors
-    BitlistEmpty, // bitlist empty, it does not have length bit
-    BitlistTrailingByteZero, // trailing byte is zero (missing delimiter bit)
-    BitlistTooManyBits, // too many bits
-    BitlistTooManyBytes, // unexpected number of bytes
-
-    // General validation errors
-    InvalidEncoding, // invalid encoding
-    Size, // incorrect size
-    BytesLength, // bytes array does not have the correct length
-    VectorLength, // vector does not have the correct length
-    ListTooBig, // list length is higher than max value
-
-    // Existing errors to maintain compatibility
-    IndexOutOfBounds,
-    Overflow,
-    NoSerializedFixedSizeAvailable,
-    NoSerializedSizeAvailable,
-    UnknownType,
-    InvalidSerializedIntLengthType,
-    UnSupportedPointerType,
-    UnionIsNotTagged,
-    NotImplemented,
-    NotSupported,
-    ChunkSizeExceedsLimit,
-};
-
 /// Number of bytes per chunk.
 const BYTES_PER_CHUNK = 32;
-
-/// Number of bytes per serialized length offset.
-const BYTES_PER_LENGTH_OFFSET = 4;
-
-/// Validates that the bitlist is correctly formed
-pub fn validateBitlist(buf: []const u8, bit_limit: u64) SSZError!void {
-    const byte_len = buf.len;
-    if (byte_len == 0) {
-        return SSZError.BitlistEmpty;
-    }
-
-    // Maximum possible bytes in a bitlist with provided bitlimit.
-    const max_bytes = (bit_limit >> 3) + 1;
-    if (byte_len > max_bytes) {
-        return SSZError.BitlistTooManyBytes;
-    }
-
-    // The most significant bit is present in the last byte in the array.
-    const last = buf[byte_len - 1];
-    if (last == 0) {
-        return SSZError.BitlistTrailingByteZero;
-    }
-
-    // Determine the position of the most significant bit.
-    // Find most significant bit position
-    const msb_pos = if (last == 0) 0 else 8 - @clz(last);
-
-    // The absolute position of the most significant bit will be the number of
-    // bits in the preceding bytes plus the position of the most significant
-    // bit. Subtract this value by 1 to determine the length of the bitlist.
-    const num_of_bits: u64 = @intCast(8 * (byte_len - 1) + msb_pos - 1);
-
-    if (num_of_bits > bit_limit) {
-        return SSZError.BitlistTooManyBits;
-    }
-}
-
-/// Decodes and validates the length from dynamic input
-pub fn decodeDynamicLength(buf: []const u8, max_size: u32) SSZError!u32 {
-    if (buf.len == 0) {
-        return 0;
-    }
-    if (buf.len < 4) {
-        return SSZError.DynamicLengthTooShort;
-    }
-
-    const offset = std.mem.readInt(u32, buf[0..4], std.builtin.Endian.little);
-    if (offset % BYTES_PER_LENGTH_OFFSET != 0 or offset == 0) {
-        return SSZError.DynamicLengthNotOffsetSized;
-    }
-
-    const length = offset / BYTES_PER_LENGTH_OFFSET;
-    if (length > max_size) {
-        return SSZError.DynamicLengthExceedsMax;
-    }
-
-    return length;
-}
 
 pub fn serializedFixedSize(comptime T: type) !usize {
     const info = @typeInfo(T);
@@ -435,10 +338,10 @@ pub fn deserialize(comptime T: type, serialized: []const u8, out: *T, allocator:
                         const end = if (i < size - 1) indices[i + 1] else serialized.len;
                         const start = indices[i];
                         if (start >= serialized.len or end > serialized.len) {
-                            return SSZError.OffsetExceedsSize;
+                            return error.OffsetExceedsSize;
                         }
                         if (i > 0 and start < indices[i - 1]) {
-                            return SSZError.OffsetOrdering;
+                            return error.OffsetOrdering;
                         }
                         try deserialize(U, serialized[start..end], &out[i], allocator);
                     }

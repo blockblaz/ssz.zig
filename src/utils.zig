@@ -27,6 +27,8 @@ pub fn List(comptime T: type, comptime N: usize) type {
         const Item = T;
         const Inner = std.BoundedArray(T, N);
 
+        const OFFSET_SIZE = 4;
+
         inner: Inner,
 
         pub fn sszEncode(self: *const Self, l: *ArrayList(u8)) !void {
@@ -47,7 +49,7 @@ pub fn List(comptime T: type, comptime N: usize) type {
 
                 // Validate list size against maximum N
                 if (n_items > N) {
-                    return lib.SSZError.ListTooBig;
+                    return error.ListTooBig;
                 }
 
                 for (0..n_items) |i| {
@@ -57,7 +59,7 @@ pub fn List(comptime T: type, comptime N: usize) type {
                 }
             } else {
                 // Validate and decode dynamic list length
-                const size = try lib.decodeDynamicLength(serialized, N);
+                const size = try Self.decodeDynamicLength(serialized);
 
                 const indices = std.mem.bytesAsSlice(u32, serialized[0 .. size * 4]);
                 var i = @as(usize, 0);
@@ -65,10 +67,10 @@ pub fn List(comptime T: type, comptime N: usize) type {
                     const end = if (i < size - 1) indices[i + 1] else serialized.len;
                     const start = indices[i];
                     if (start >= serialized.len or end > serialized.len) {
-                        return lib.SSZError.OffsetExceedsSize;
+                        return error.OffsetExceedsSize;
                     }
                     if (i > 0 and start < indices[i - 1]) {
-                        return lib.SSZError.OffsetOrdering;
+                        return error.OffsetOrdering;
                     }
                     const item = try out.inner.addOne();
                     try deserialize(Self.Item, serialized[start..end], item, allocator);
@@ -152,6 +154,28 @@ pub fn List(comptime T: type, comptime N: usize) type {
                 },
             }
         }
+
+        /// Decodes and validates the length from dynamic input
+        pub fn decodeDynamicLength(buf: []const u8) !u32 {
+            if (buf.len == 0) {
+                return 0;
+            }
+            if (buf.len < 4) {
+                return error.DynamicLengthTooShort;
+            }
+
+            const offset = std.mem.readInt(u32, buf[0..4], std.builtin.Endian.little);
+            if (offset % OFFSET_SIZE != 0 or offset == 0) {
+                return error.DynamicLengthNotOffsetSized;
+            }
+
+            const length = offset / OFFSET_SIZE;
+            if (length > N) {
+                return error.DynamicLengthExceedsMax;
+            }
+
+            return length;
+        }
     };
 }
 
@@ -181,7 +205,7 @@ pub fn Bitlist(comptime N: usize) type {
             out.* = try init(0);
 
             // Comprehensive validation (handles empty, trailing zero, size limits)
-            try lib.validateBitlist(serialized, N);
+            try Self.validateBitlist(serialized);
 
             // If validation passed but buffer is empty, we're done
             if (serialized.len == 0) {
@@ -283,6 +307,37 @@ pub fn Bitlist(comptime N: usize) type {
             var tmp: chunk = undefined;
             try lib.merkleize(sha256, chunks, null, &tmp);
             lib.mixInLength2(tmp, bit_length, out);
+        }
+
+        /// Validates that the bitlist is correctly formed
+        pub fn validateBitlist(buf: []const u8) !void {
+            const byte_len = buf.len;
+            if (byte_len == 0) return;
+
+            // Maximum possible bytes in a bitlist with provided bitlimit.
+            const max_bytes = (N >> 3) + 1;
+            if (byte_len > max_bytes) {
+                return error.BitlistTooManyBytes;
+            }
+
+            // The most significant bit is present in the last byte in the array.
+            const last = buf[byte_len - 1];
+            if (last == 0) {
+                return error.BitlistTrailingByteZero;
+            }
+
+            // Determine the position of the most significant bit.
+            // Find most significant bit position
+            const msb_pos = if (last == 0) 0 else 8 - @clz(last);
+
+            // The absolute position of the most significant bit will be the number of
+            // bits in the preceding bytes plus the position of the most significant
+            // bit. Subtract this value by 1 to determine the length of the bitlist.
+            const num_of_bits: u64 = @intCast(8 * (byte_len - 1) + msb_pos - 1);
+
+            if (num_of_bits > N) {
+                return error.BitlistTooManyBits;
+            }
         }
     };
 }

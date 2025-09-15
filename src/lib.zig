@@ -13,9 +13,6 @@ const Allocator = std.mem.Allocator;
 /// Number of bytes per chunk.
 const BYTES_PER_CHUNK = 32;
 
-/// Number of bytes per serialized length offset.
-const BYTES_PER_LENGTH_OFFSET = 4;
-
 pub fn serializedFixedSize(comptime T: type) !usize {
     const info = @typeInfo(T);
     return switch (info) {
@@ -341,7 +338,10 @@ pub fn deserialize(comptime T: type, serialized: []const u8, out: *T, allocator:
                         const end = if (i < size - 1) indices[i + 1] else serialized.len;
                         const start = indices[i];
                         if (start >= serialized.len or end > serialized.len) {
-                            return error.IndexOutOfBounds;
+                            return error.OffsetExceedsSize;
+                        }
+                        if (i > 0 and start < indices[i - 1]) {
+                            return error.OffsetOrdering;
                         }
                         try deserialize(U, serialized[start..end], &out[i], allocator);
                     }

@@ -406,15 +406,7 @@ test "deserializes an invalid Vector[N] payload" {
     defer list.deinit();
 
     try serialize([2]Pastry, pastries, &list);
-    if (deserialize(@TypeOf(pastries), list.items[0 .. list.items.len / 2], &out, null)) {
-        @panic("missed error");
-    } else |err| switch (err) {
-        error.IndexOutOfBounds => {},
-        // catch error.NoSerializedFixedSizeAvailable, and a potential allocation error if the API
-        // for deserializing slices changes to accept an allocator. None of these errors should
-        // happen.
-        else => @panic(try std.fmt.allocPrint(std.testing.allocator, "wrong type of error found, err={any}", .{err})),
-    }
+    try std.testing.expectError(error.OffsetExceedsSize, deserialize(@TypeOf(pastries), list.items[0 .. list.items.len / 2], &out, null));
 }
 
 test "deserializes an union" {
@@ -1503,4 +1495,118 @@ test "Zero-length array" {
     try hashTreeRoot([0]u32, empty, &hash, std.testing.allocator);
     // Should be the zero chunk
     try expect(std.mem.eql(u8, &hash, &([_]u8{0} ** 32)));
+}
+
+// SSZ Validation Tests
+test "validateBitlist - comprehensive validation" {
+    // Test empty bitlist
+    {
+        const empty_buf = [_]u8{};
+        try utils.Bitlist(10).validateBitlist(&empty_buf);
+    }
+
+    // Test bitlist with trailing zero byte
+    {
+        const zero_trailing = [_]u8{ 0xFF, 0x00 };
+        try std.testing.expectError(error.BitlistTrailingByteZero, utils.Bitlist(16).validateBitlist(&zero_trailing));
+    }
+
+    // Test bitlist exceeding bit limit
+    {
+        const too_many_bits = [_]u8{ 0xFF, 0xFF, 0xFF }; // 23 bits (exceeds limit of 16)
+        try std.testing.expectError(error.BitlistTooManyBits, utils.Bitlist(16).validateBitlist(&too_many_bits));
+    }
+
+    // Test bitlist exceeding byte limit
+    {
+        const too_many_bytes = [_]u8{ 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+        try std.testing.expectError(error.BitlistTooManyBytes, utils.Bitlist(16).validateBitlist(&too_many_bytes));
+    }
+
+    // Test valid bitlist
+    {
+        const valid_bitlist = [_]u8{ 0xFF, 0x01 }; // 8 + 0 = 8 bits (delimiter at position 0 of second byte)
+        try utils.Bitlist(16).validateBitlist(&valid_bitlist); // Should not error
+    }
+}
+
+test "decodeDynamicLength - comprehensive validation" {
+    // Test empty buffer
+    {
+        const empty_buf = [_]u8{};
+        const length = try utils.List(u32, 100).decodeDynamicLength(&empty_buf);
+        try expect(length == 0);
+    }
+
+    // Test buffer too short
+    {
+        const short_buf = [_]u8{ 0x01, 0x02 };
+        try std.testing.expectError(error.DynamicLengthTooShort, utils.List(u32, 100).decodeDynamicLength(&short_buf));
+    }
+
+    // Test invalid offset (not multiple of 4)
+    {
+        const invalid_offset = [_]u8{ 0x03, 0x00, 0x00, 0x00 }; // offset = 3, not multiple of 4
+        try std.testing.expectError(error.DynamicLengthNotOffsetSized, utils.List(u32, 1000).decodeDynamicLength(&invalid_offset));
+    }
+
+    // Test zero offset
+    {
+        const zero_offset = [_]u8{ 0x00, 0x00, 0x00, 0x00 };
+        try std.testing.expectError(error.DynamicLengthNotOffsetSized, utils.List(u32, 100).decodeDynamicLength(&zero_offset));
+    }
+
+    // Test length exceeds max
+    {
+        const big_length = [_]u8{ 0x00, 0x02, 0x00, 0x00 }; // offset = 512, length = 128
+        try std.testing.expectError(error.DynamicLengthExceedsMax, utils.List(u32, 100).decodeDynamicLength(&big_length));
+    }
+
+    // Test valid length
+    {
+        const valid_length = [_]u8{ 0x10, 0x00, 0x00, 0x00 }; // offset = 16, length = 4
+        const length = try utils.List(u32, 100).decodeDynamicLength(&valid_length);
+        try expect(length == 4);
+    }
+}
+
+test "List validation - size limits enforced" {
+    var list = try utils.List(u32, 3).init(0);
+
+    // Test oversized fixed-size list
+    {
+        // Create serialized data representing 5 u32s (exceeds max of 3)
+        var oversized_data = [_]u8{
+            0x01, 0x00, 0x00, 0x00, // u32 = 1
+            0x02, 0x00, 0x00, 0x00, // u32 = 2
+            0x03, 0x00, 0x00, 0x00, // u32 = 3
+            0x04, 0x00, 0x00, 0x00, // u32 = 4
+            0x05, 0x00, 0x00, 0x00, // u32 = 5
+        };
+
+        try std.testing.expectError(error.ListTooBig, deserialize(utils.List(u32, 3), &oversized_data, &list, null));
+    }
+}
+
+test "Bitlist validation - comprehensive style" {
+    var bitlist = try utils.Bitlist(8).init(0);
+
+    // Test bitlist with missing delimiter
+    {
+        const no_delimiter = [_]u8{0x00};
+        try std.testing.expectError(error.BitlistTrailingByteZero, deserialize(utils.Bitlist(8), &no_delimiter, &bitlist, null));
+    }
+
+    // Test bitlist exceeding size limit
+    {
+        const too_large = [_]u8{ 0xFF, 0xFF }; // 16 bits, but limit is 8
+        try std.testing.expectError(error.BitlistTooManyBits, deserialize(utils.Bitlist(8), &too_large, &bitlist, null));
+    }
+
+    // Test valid bitlist
+    {
+        const valid = [_]u8{0x07}; // 2 data bits: 11, delimiter at position 2
+        try deserialize(utils.Bitlist(8), &valid, &bitlist, null);
+        try expect(bitlist.length == 2); // Should have 2 actual data bits
+    }
 }

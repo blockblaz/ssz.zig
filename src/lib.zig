@@ -3,17 +3,15 @@
 
 const std = @import("std");
 pub const utils = @import("./utils.zig");
+pub const zeros = @import("./zeros.zig");
 const ArrayList = std.ArrayList;
 const builtin = std.builtin;
 const sha256 = std.crypto.hash.sha2.Sha256;
-const hashes_of_zero = @import("./zeros.zig").hashes_of_zero;
+const hashes_of_zero = zeros.hashes_of_zero;
 const Allocator = std.mem.Allocator;
 
 /// Number of bytes per chunk.
 const BYTES_PER_CHUNK = 32;
-
-/// Number of bytes per serialized length offset.
-const BYTES_PER_LENGTH_OFFSET = 4;
 
 pub fn serializedFixedSize(comptime T: type) !usize {
     const info = @typeInfo(T);
@@ -327,9 +325,9 @@ pub fn deserialize(comptime T: type, serialized: []const u8, out: *T, allocator:
             } else {
                 const U = info.array.child;
                 if (try isFixedSizeObject(U)) {
-                    comptime var i = 0;
+                    var i: usize = 0;
                     const pitch = try comptime serializedFixedSize(U);
-                    inline while (i < out.len) : (i += pitch) {
+                    while (i < out.len) : (i += pitch) {
                         try deserialize(U, serialized[i * pitch .. (i + 1) * pitch], &out[i], allocator);
                     }
                 } else {
@@ -342,7 +340,10 @@ pub fn deserialize(comptime T: type, serialized: []const u8, out: *T, allocator:
                         const end = if (i < size - 1) indices[i + 1] else serialized.len;
                         const start = indices[i];
                         if (start >= serialized.len or end > serialized.len) {
-                            return error.IndexOutOfBounds;
+                            return error.OffsetExceedsSize;
+                        }
+                        if (i > 0 and start < indices[i - 1]) {
+                            return error.OffsetOrdering;
                         }
                         try deserialize(U, serialized[start..end], &out[i], allocator);
                     }

@@ -35,16 +35,16 @@ pub fn build(b: *Builder) void {
     tests_tests.root_module.addImport("ssz.zig", mod);
     const run_tests_tests = b.addRunArtifact(tests_tests);
 
-    const validator_tests = b.addTest(.{
-        .root_source_file = .{ .cwd_relative = "src/validator_tests.zig" },
+    const list_tests = b.addTest(.{
+        .root_source_file = .{ .cwd_relative = "src/list_tests.zig" },
         .optimize = test_optimize,
         .target = target,
     });
-    validator_tests.root_module.addImport("ssz.zig", mod);
-    const run_validator_tests = b.addRunArtifact(validator_tests);
+    list_tests.root_module.addImport("ssz.zig", mod);
+    const run_list_tests = b.addRunArtifact(list_tests);
 
     const test_step = b.step("test", "Run library tests");
     test_step.dependOn(&run_main_tests.step);
     test_step.dependOn(&run_tests_tests.step);
-    test_step.dependOn(&run_validator_tests.step);
+    test_step.dependOn(&run_list_tests.step);
 }

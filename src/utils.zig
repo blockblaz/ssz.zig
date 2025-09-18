@@ -283,29 +283,50 @@ pub fn Bitlist(comptime N: usize) type {
                 return;
             }
 
-            var list = ArrayList(u8).init(allctr);
-            defer list.deinit();
+            // pack_bits excludes delimiter bit
+            var bitfield_bytes = ArrayList(u8).init(allctr);
+            defer bitfield_bytes.deinit();
 
-            const byte_slice = self.inner.constSlice();
-            const full_bytes = bit_length / 8;
-            const remaining_bits = bit_length % 8;
+            // Get the internal bit data (without delimiter bit)
+            const slice = self.inner.constSlice();
+            if (slice.len > 0) {
+                // Append all bytes except the last one
+                if (slice.len > 1) {
+                    try bitfield_bytes.appendSlice(slice[0 .. slice.len - 1]);
+                }
 
-            if (full_bytes > 0) {
-                try list.appendSlice(byte_slice[0..full_bytes]);
+                // For the last byte, extract only the actual bits while excluding delimiter bit
+                const last_byte = slice[slice.len - 1];
+                const bits_in_last_byte = bit_length % 8;
+                if (bits_in_last_byte > 0) {
+                    // Mask out the delimiter bit and any unused bits
+                    const mask = (@as(u8, 1) << @intCast(bits_in_last_byte)) - 1;
+                    try bitfield_bytes.append(last_byte & mask);
+                }
             }
 
-            if (remaining_bits > 0) {
-                const last_byte = byte_slice[full_bytes];
-                const mask = (@as(u8, 1) << @truncate(remaining_bits)) - 1;
-                try list.append(last_byte & mask);
+            // Remove trailing zeros
+            while (bitfield_bytes.items.len > 0 and bitfield_bytes.items[bitfield_bytes.items.len - 1] == 0) {
+                _ = bitfield_bytes.pop();
             }
 
-            const padding_size = (BYTES_PER_CHUNK - list.items.len % BYTES_PER_CHUNK) % BYTES_PER_CHUNK;
-            _ = try list.writer().write(zero_chunk[0..padding_size]);
+            // Handle edge case: if all bits are false, we end up with empty array
+            // In this case, we need at least one zero chunk for merkleization
+            if (bitfield_bytes.items.len == 0) {
+                // Add one zero chunk
+                try bitfield_bytes.appendSlice(zero_chunk[0..]);
+            } else {
+                // Pack bits into chunks (pad to chunk boundary)
+                const padding_size = (BYTES_PER_CHUNK - bitfield_bytes.items.len % BYTES_PER_CHUNK) % BYTES_PER_CHUNK;
+                _ = try bitfield_bytes.writer().write(zero_chunk[0..padding_size]);
+            }
 
-            const chunks = std.mem.bytesAsSlice(chunk, list.items);
+            const chunks = std.mem.bytesAsSlice(chunk, bitfield_bytes.items);
             var tmp: chunk = undefined;
-            try lib.merkleize(sha256, chunks, null, &tmp);
+
+            // Use chunk_count limit as per SSZ specification
+            const chunk_count_limit = (N + 255) / 256;
+            try lib.merkleize(sha256, chunks, chunk_count_limit, &tmp);
             lib.mixInLength2(tmp, bit_length, out);
         }
 

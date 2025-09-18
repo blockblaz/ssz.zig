@@ -18,18 +18,15 @@ pub fn build(b: *Builder) void {
     });
     b.installArtifact(lib);
 
-    // Use ReleaseSafe for tests to avoid "object file too large" errors
-    const test_optimize = if (optimize == .Debug) .ReleaseSafe else optimize;
-
     const main_tests = b.addTest(.{
         .root_source_file = .{ .cwd_relative = "src/lib.zig" },
-        .optimize = test_optimize,
+        .optimize = optimize,
         .target = target,
     });
     const run_main_tests = b.addRunArtifact(main_tests);
     const tests_tests = b.addTest(.{
         .root_source_file = .{ .cwd_relative = "src/tests.zig" },
-        .optimize = test_optimize,
+        .optimize = optimize,
         .target = target,
     });
     tests_tests.root_module.addImport("ssz.zig", mod);
@@ -37,7 +34,7 @@ pub fn build(b: *Builder) void {
 
     const beacon_tests = b.addTest(.{
         .root_source_file = .{ .cwd_relative = "src/beacon_tests.zig" },
-        .optimize = test_optimize,
+        .optimize = optimize,
         .target = target,
     });
     beacon_tests.root_module.addImport("ssz.zig", mod);

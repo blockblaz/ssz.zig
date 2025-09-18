@@ -67,6 +67,10 @@ test "Validator struct hash tree root" {
     var hash: [32]u8 = undefined;
     try hashTreeRoot(Validator, validator, &hash, std.testing.allocator);
 
+    // Validate against expected hash
+    const expected_validator_hash = [_]u8{ 0x70, 0x68, 0xE5, 0x06, 0xCB, 0xFF, 0xCD, 0x31, 0xBD, 0x2D, 0x13, 0x42, 0x5E, 0x4F, 0xDE, 0x98, 0x6E, 0xF3, 0x5E, 0x6F, 0xB5, 0x0F, 0x35, 0x9D, 0x7A, 0x26, 0xB6, 0x33, 0x2E, 0xE2, 0xCB, 0x94 };
+    try expect(std.mem.eql(u8, &hash, &expected_validator_hash));
+
     // Hash should be deterministic for the same validator
     var hash2: [32]u8 = undefined;
     try hashTreeRoot(Validator, validator, &hash2, std.testing.allocator);

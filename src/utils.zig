@@ -184,13 +184,14 @@ pub fn List(comptime T: type, comptime N: usize) type {
 pub fn Bitlist(comptime N: usize) type {
     return struct {
         const Self = @This();
-        const Inner = std.BoundedArray(u8, (N / 8) + 1);
+        const Inner = std.BoundedArray(u8, (N + 7) / 8);
 
         inner: Inner,
         length: usize,
 
         pub fn sszEncode(self: *const Self, l: *ArrayList(u8)) !void {
             if (self.length == 0) {
+                try l.append(@as(u8, 1));
                 return;
             }
 
@@ -236,7 +237,7 @@ pub fn Bitlist(comptime N: usize) type {
         }
 
         pub fn init(length: usize) error{Overflow}!Self {
-            return .{ .inner = try Inner.init((length) / 8 + 1), .length = length };
+            return .{ .inner = try Inner.init((length + 7) / 8), .length = length };
         }
 
         pub fn get(self: Self, i: usize) bool {

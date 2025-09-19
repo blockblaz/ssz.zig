@@ -783,6 +783,7 @@ test "(de)serialization of full Bitlist[N] when N % 8 == 0" {
     var list = ArrayList(u8).init(std.testing.allocator);
     defer list.deinit();
     try serialize(@TypeOf(bitlist), bitlist, &list);
+
     // should serialize to 0501
     try expect(std.mem.eql(u8, list.items, &[_]u8{ 0x05, 0x01 }));
     var bitlist_deser: @TypeOf(bitlist) = undefined;

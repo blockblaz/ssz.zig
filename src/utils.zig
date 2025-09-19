@@ -184,6 +184,7 @@ pub fn List(comptime T: type, comptime N: usize) type {
 pub fn Bitlist(comptime N: usize) type {
     return struct {
         const Self = @This();
+        // stores list without sentinel
         const Inner = std.BoundedArray(u8, (N + 7) / 8);
 
         inner: Inner,
@@ -200,7 +201,13 @@ pub fn Bitlist(comptime N: usize) type {
             const slice = self.inner.constSlice();
             try l.appendSlice(slice[0 .. slice.len - 1]);
 
-            try l.append(slice[slice.len - 1] | @shlExact(@as(u8, 1), @truncate(self.length % 8)));
+            if (self.length % 8 == 0) {
+                // sentinel is extra byte
+                try l.append(slice[slice.len - 1]);
+                try l.append(1);
+            } else {
+                try l.append(slice[slice.len - 1] | @shlExact(@as(u8, 1), @truncate(self.length % 8)));
+            }
         }
 
         pub fn sszDecode(serialized: []const u8, out: *Self, _: ?std.mem.Allocator) !void {
@@ -256,7 +263,7 @@ pub fn Bitlist(comptime N: usize) type {
         }
 
         pub fn append(self: *Self, item: bool) error{Overflow}!void {
-            if (self.length % 8 == 7 or self.length == 0) {
+            if (self.length % 8 == 0) {
                 try self.inner.append(0);
             }
             self.length += 1;

@@ -279,9 +279,8 @@ pub fn Bitlist(comptime N: usize) type {
         }
 
         pub fn serializedSize(self: *const Self) usize {
-            if (self.length == 0) return 0;
             // Size is number of bytes needed plus one bit for the sentinel
-            return (self.length + 7) / 8;
+            return (self.length + 8) / 8;
         }
 
         pub fn hashTreeRoot(self: *const Self, out: *[32]u8, allctr: Allocator) !void {

@@ -41,6 +41,7 @@ pub fn List(comptime T: type, comptime N: usize) type {
 
         pub fn sszDecode(serialized: []const u8, out: *Self, allocator: ?std.mem.Allocator) !void {
             // BitList[N] or regular List[N]?
+            out.* = try init(0);
             if (Self.Item == bool) {
                 @panic("Use the optimized utils.Bitlist(N) instead of utils.List(bool, N)");
             } else if (try lib.isFixedSizeObject(Self.Item)) {

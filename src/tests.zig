@@ -743,6 +743,55 @@ test "(de)serialization of Bitlist[N] when N % 8 != 0" {
     try expect(bitlist.eql(&bitlist_deser));
 }
 
+test "(de)serialization of empty Bitlist[N]" {
+    const bitlist = try utils.Bitlist(8).init(0);
+    var list = ArrayList(u8).init(std.testing.allocator);
+    defer list.deinit();
+    try serialize(@TypeOf(bitlist), bitlist, &list);
+    try expect(std.mem.eql(u8, list.items, &[_]u8{0x01}));
+    var bitlist_deser: @TypeOf(bitlist) = undefined;
+    try deserialize(@TypeOf(bitlist), list.items, &bitlist_deser, null);
+    try expect(bitlist.len() == bitlist_deser.len());
+    try expect(bitlist.eql(&bitlist_deser));
+}
+
+test "(de)serialization of Bitlist[0]" {
+    const bitlist = try utils.Bitlist(0).init(0);
+    var list = ArrayList(u8).init(std.testing.allocator);
+    defer list.deinit();
+    try serialize(@TypeOf(bitlist), bitlist, &list);
+    try expect(std.mem.eql(u8, list.items, &[_]u8{0x01}));
+    var bitlist_deser: @TypeOf(bitlist) = undefined;
+    try deserialize(@TypeOf(bitlist), list.items, &bitlist_deser, null);
+    try expect(bitlist.len() == bitlist_deser.len());
+    try expect(bitlist.eql(&bitlist_deser));
+}
+
+test "(de)serialization of full Bitlist[N] when N % 8 == 0" {
+    var bitlist = try utils.Bitlist(8).init(0);
+    try bitlist.append(true);
+    try bitlist.append(false);
+    try bitlist.append(true);
+    try bitlist.append(false);
+    try bitlist.append(false);
+    try bitlist.append(false);
+    try bitlist.append(false);
+    try bitlist.append(false);
+    try expect(bitlist.get(1) == false);
+    try expect(bitlist.get(2) == true);
+
+    var list = ArrayList(u8).init(std.testing.allocator);
+    defer list.deinit();
+    try serialize(@TypeOf(bitlist), bitlist, &list);
+
+    // should serialize to 0501
+    try expect(std.mem.eql(u8, list.items, &[_]u8{ 0x05, 0x01 }));
+    var bitlist_deser: @TypeOf(bitlist) = undefined;
+    try deserialize(@TypeOf(bitlist), list.items, &bitlist_deser, null);
+    try expect(bitlist.len() == bitlist_deser.len());
+    try expect(bitlist.eql(&bitlist_deser));
+}
+
 test "structs with nested fixed/variable size u8 array" {
     const Bytes32 = [32]u8;
     var isFixedSizeType = try isFixedSizeObject(Bytes32);

@@ -41,6 +41,7 @@ pub fn List(comptime T: type, comptime N: usize) type {
 
         pub fn sszDecode(serialized: []const u8, out: *Self, allocator: ?std.mem.Allocator) !void {
             // BitList[N] or regular List[N]?
+            out.* = try init(0);
             if (Self.Item == bool) {
                 @panic("Use the optimized utils.Bitlist(N) instead of utils.List(bool, N)");
             } else if (try lib.isFixedSizeObject(Self.Item)) {
@@ -183,6 +184,7 @@ pub fn List(comptime T: type, comptime N: usize) type {
 pub fn Bitlist(comptime N: usize) type {
     return struct {
         const Self = @This();
+        // stores list without sentinel
         const Inner = std.BoundedArray(u8, (N + 7) / 8);
 
         inner: Inner,
@@ -190,6 +192,7 @@ pub fn Bitlist(comptime N: usize) type {
 
         pub fn sszEncode(self: *const Self, l: *ArrayList(u8)) !void {
             if (self.length == 0) {
+                try l.append(@as(u8, 1));
                 return;
             }
 
@@ -198,7 +201,13 @@ pub fn Bitlist(comptime N: usize) type {
             const slice = self.inner.constSlice();
             try l.appendSlice(slice[0 .. slice.len - 1]);
 
-            try l.append(slice[slice.len - 1] | @shlExact(@as(u8, 1), @truncate(self.length % 8)));
+            if (self.length % 8 == 0) {
+                // sentinel is extra byte
+                try l.append(slice[slice.len - 1]);
+                try l.append(1);
+            } else {
+                try l.append(slice[slice.len - 1] | @shlExact(@as(u8, 1), @truncate(self.length % 8)));
+            }
         }
 
         pub fn sszDecode(serialized: []const u8, out: *Self, _: ?std.mem.Allocator) !void {
@@ -254,7 +263,7 @@ pub fn Bitlist(comptime N: usize) type {
         }
 
         pub fn append(self: *Self, item: bool) error{Overflow}!void {
-            if (self.length % 8 == 7 or self.length == 0) {
+            if (self.length % 8 == 0) {
                 try self.inner.append(0);
             }
             self.length += 1;
@@ -270,9 +279,8 @@ pub fn Bitlist(comptime N: usize) type {
         }
 
         pub fn serializedSize(self: *const Self) usize {
-            if (self.length == 0) return 0;
             // Size is number of bytes needed plus one bit for the sentinel
-            return (self.length + 7) / 8;
+            return (self.length + 7 + 1) / 8;
         }
 
         pub fn hashTreeRoot(self: *const Self, out: *[32]u8, allctr: Allocator) !void {
@@ -286,23 +294,9 @@ pub fn Bitlist(comptime N: usize) type {
             var bitfield_bytes = ArrayList(u8).init(allctr);
             defer bitfield_bytes.deinit();
 
-            // Get the internal bit data (without delimiter bit)
+            // Get the internal bit data since we don't store delimiter
             const slice = self.inner.constSlice();
-            if (slice.len > 0) {
-                // Append all bytes except the last one
-                if (slice.len > 1) {
-                    try bitfield_bytes.appendSlice(slice[0 .. slice.len - 1]);
-                }
-
-                // For the last byte, extract only the actual bits while excluding delimiter bit
-                const last_byte = slice[slice.len - 1];
-                const bits_in_last_byte = bit_length % 8;
-                if (bits_in_last_byte > 0) {
-                    // Mask out the delimiter bit and any unused bits
-                    const mask = (@as(u8, 1) << @intCast(bits_in_last_byte)) - 1;
-                    try bitfield_bytes.append(last_byte & mask);
-                }
-            }
+            try bitfield_bytes.appendSlice(slice[0..slice.len]);
 
             // Remove trailing zeros but keep at least one byte
             // This avoids the wasteful pattern of removing all zeros then adding back a chunk
@@ -329,7 +323,7 @@ pub fn Bitlist(comptime N: usize) type {
             if (byte_len == 0) return;
 
             // Maximum possible bytes in a bitlist with provided bitlimit.
-            const max_bytes = (N >> 3) + 1;
+            const max_bytes = ((N + 7 + 1) >> 3);
             if (byte_len > max_bytes) {
                 return error.BitlistTooManyBytes;
             }

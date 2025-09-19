@@ -1041,78 +1041,6 @@ test "isFixedSizeObject correctly identifies List/Bitlist as variable-size" {
     try expect(!try isFixedSizeObject(StructWithList));
 }
 
-test "Zeam-style List/Bitlist usage with tree root stability" {
-    const MAX_VALIDATORS = 2048;
-    const MAX_HISTORICAL_BLOCK_HASHES = 4096;
-
-    const Root = [32]u8;
-
-    const Mini3SFCheckpoint = struct {
-        root: Root,
-        slot: u64,
-    };
-
-    const Mini3SFVote = struct {
-        validator_id: u64,
-        slot: u64,
-        head: Mini3SFCheckpoint,
-        target: Mini3SFCheckpoint,
-        source: Mini3SFCheckpoint,
-    };
-
-    const Mini3SFVotes = utils.List(Mini3SFVote, MAX_VALIDATORS);
-    const HistoricalBlockHashes = utils.List(Root, MAX_HISTORICAL_BLOCK_HASHES);
-    const JustifiedSlots = utils.Bitlist(MAX_HISTORICAL_BLOCK_HASHES);
-
-    const BeamBlockBody = struct {
-        votes: Mini3SFVotes,
-    };
-
-    const BeamState = struct {
-        slot: u64,
-        historical_block_hashes: HistoricalBlockHashes,
-        justified_slots: JustifiedSlots,
-    };
-
-    var votes = try Mini3SFVotes.init(0);
-    try votes.append(Mini3SFVote{
-        .validator_id = 1,
-        .slot = 10,
-        .head = Mini3SFCheckpoint{ .root = [_]u8{1} ** 32, .slot = 10 },
-        .target = Mini3SFCheckpoint{ .root = [_]u8{2} ** 32, .slot = 9 },
-        .source = Mini3SFCheckpoint{ .root = [_]u8{3} ** 32, .slot = 8 },
-    });
-
-    var hashes = try HistoricalBlockHashes.init(0);
-    try hashes.append([_]u8{0xaa} ** 32);
-    try hashes.append([_]u8{0xbb} ** 32);
-
-    var bitlist = try JustifiedSlots.init(0);
-    try bitlist.append(true);
-    try bitlist.append(false);
-    try bitlist.append(true);
-
-    const body = BeamBlockBody{ .votes = votes };
-    const state = BeamState{
-        .slot = 42,
-        .historical_block_hashes = hashes,
-        .justified_slots = bitlist,
-    };
-
-    var body_hash1: [32]u8 = undefined;
-    var body_hash2: [32]u8 = undefined;
-    var state_hash1: [32]u8 = undefined;
-    var state_hash2: [32]u8 = undefined;
-
-    try hashTreeRoot(BeamBlockBody, body, &body_hash1, std.testing.allocator);
-    try hashTreeRoot(BeamBlockBody, body, &body_hash2, std.testing.allocator);
-    try hashTreeRoot(BeamState, state, &state_hash1, std.testing.allocator);
-    try hashTreeRoot(BeamState, state, &state_hash2, std.testing.allocator);
-
-    try expect(std.mem.eql(u8, &body_hash1, &body_hash2));
-    try expect(std.mem.eql(u8, &state_hash1, &state_hash2));
-}
-
 test "zeam stf input" {
     const Bytes32 = [32]u8;
     const Bytes48 = [48]u8;
@@ -1404,6 +1332,53 @@ test "Bitlist edge cases" {
     try expect(std.mem.eql(u8, &hash2, &expected_true));
 }
 
+test "Bitlist trailing zeros optimization" {
+    const TestBitlist = utils.Bitlist(256);
+
+    // Test case 1: 8 false bits - should result in one 0x00 byte after pack_bits
+    var eight_false = try TestBitlist.init(0);
+    for (0..8) |_| {
+        try eight_false.append(false);
+    }
+
+    var hash1: [32]u8 = undefined;
+    try hashTreeRoot(TestBitlist, eight_false, &hash1, std.testing.allocator);
+
+    // Expected hash for 8 false bits in Bitlist[256]
+    // This should keep one zero byte and not remove all then add back a chunk
+    const expected_eight_false = [_]u8{
+        0x5a, 0xc7, 0x8d, 0x95, 0x32, 0x11, 0xaa, 0x82,
+        0x2c, 0x3a, 0xe6, 0xe9, 0xb0, 0x05, 0x8e, 0x42,
+        0x39, 0x4d, 0xd3, 0x2e, 0x59, 0x92, 0xf2, 0x9f,
+        0x9c, 0x12, 0xda, 0x36, 0x81, 0x98, 0x51, 0x30,
+    };
+    try expect(std.mem.eql(u8, &hash1, &expected_eight_false));
+
+    // Test case 2: Pattern with trailing zeros but non-zero first byte
+    var pattern = try TestBitlist.init(0);
+    try pattern.append(true);
+    try pattern.append(false);
+    try pattern.append(true);
+    // Add 13 false bits to get 16 total
+    for (0..13) |_| {
+        try pattern.append(false);
+    }
+
+    var hash2: [32]u8 = undefined;
+    try hashTreeRoot(TestBitlist, pattern, &hash2, std.testing.allocator);
+
+    // Expected hash for [T,F,T,F...F] (16 bits total)
+    // First byte is 0x05, second byte is 0x00
+    // Should remove only the second zero byte
+    const expected_pattern = [_]u8{
+        0x94, 0x30, 0xdb, 0x52, 0x07, 0x85, 0xa6, 0x68,
+        0x94, 0xde, 0xd7, 0x55, 0x2e, 0x5e, 0x86, 0x2e,
+        0xde, 0x23, 0x18, 0x92, 0xaa, 0x19, 0xb3, 0x0e,
+        0x4a, 0xb4, 0xbd, 0xae, 0x9b, 0x7d, 0x02, 0xec,
+    };
+    try expect(std.mem.eql(u8, &hash2, &expected_pattern));
+}
+
 test "uint256 hash tree root" {
     const data: u256 = 0x0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF;
 
@@ -1609,4 +1584,9 @@ test "Bitlist validation - comprehensive style" {
         try deserialize(utils.Bitlist(8), &valid, &bitlist, null);
         try expect(bitlist.length == 2); // Should have 2 actual data bits
     }
+}
+
+// Import beacon tests
+test {
+    _ = @import("beacon_tests.zig");
 }

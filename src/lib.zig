@@ -17,6 +17,7 @@ pub fn serializedFixedSize(comptime T: type) !usize {
     const info = @typeInfo(T);
     return switch (info) {
         .int => @sizeOf(T),
+        .bool => @sizeOf(T),
         .array => info.array.len * try serializedFixedSize(info.array.child),
         .pointer => switch (info.pointer.size) {
             .slice => error.NoSerializedFixedSizeAvailable,
@@ -48,6 +49,7 @@ pub fn serializedSize(comptime T: type, data: T) !usize {
     const info = @typeInfo(T);
     return switch (info) {
         .int => @sizeOf(T),
+        .bool => @sizeOf(T),
         .array => size: {
             var size: usize = 0;
             for (0..data.len) |i| {
@@ -377,7 +379,7 @@ pub fn deserialize(comptime T: type, serialized: []const u8, out: *T, allocator:
                 }
             } else {
                 if (try isFixedSizeObject(ptr.child)) {
-                    const pitch = try serializedSize(ptr.child, undefined);
+                    const pitch = try serializedFixedSize(ptr.child);
                     const n_items = serialized.len / pitch;
                     if (allocator) |alloc| {
                         out.* = try alloc.alloc(ptr.child, n_items);

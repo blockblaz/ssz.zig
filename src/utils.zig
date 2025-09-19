@@ -44,7 +44,7 @@ pub fn List(comptime T: type, comptime N: usize) type {
             if (Self.Item == bool) {
                 @panic("Use the optimized utils.Bitlist(N) instead of utils.List(bool, N)");
             } else if (try lib.isFixedSizeObject(Self.Item)) {
-                const pitch = try lib.serializedSize(Self.Item, undefined);
+                const pitch = try lib.serializedFixedSize(Self.Item);
                 const n_items = serialized.len / pitch;
 
                 // Validate list size against maximum N
@@ -110,7 +110,7 @@ pub fn List(comptime T: type, comptime N: usize) type {
             self.inner.set(i, item);
         }
 
-        pub fn len(self: *Self) usize {
+        pub fn len(self: *const Self) usize {
             return self.inner.len;
         }
 
@@ -261,7 +261,7 @@ pub fn Bitlist(comptime N: usize) type {
             self.set(self.length - 1, item);
         }
 
-        pub fn len(self: *Self) usize {
+        pub fn len(self: *const Self) usize {
             return if (self.length > N) N else self.length;
         }
 
@@ -283,29 +283,43 @@ pub fn Bitlist(comptime N: usize) type {
                 return;
             }
 
-            var list = ArrayList(u8).init(allctr);
-            defer list.deinit();
+            var bitfield_bytes = ArrayList(u8).init(allctr);
+            defer bitfield_bytes.deinit();
 
-            const byte_slice = self.inner.constSlice();
-            const full_bytes = bit_length / 8;
-            const remaining_bits = bit_length % 8;
+            // Get the internal bit data (without delimiter bit)
+            const slice = self.inner.constSlice();
+            if (slice.len > 0) {
+                // Append all bytes except the last one
+                if (slice.len > 1) {
+                    try bitfield_bytes.appendSlice(slice[0 .. slice.len - 1]);
+                }
 
-            if (full_bytes > 0) {
-                try list.appendSlice(byte_slice[0..full_bytes]);
+                // For the last byte, extract only the actual bits while excluding delimiter bit
+                const last_byte = slice[slice.len - 1];
+                const bits_in_last_byte = bit_length % 8;
+                if (bits_in_last_byte > 0) {
+                    // Mask out the delimiter bit and any unused bits
+                    const mask = (@as(u8, 1) << @intCast(bits_in_last_byte)) - 1;
+                    try bitfield_bytes.append(last_byte & mask);
+                }
             }
 
-            if (remaining_bits > 0) {
-                const last_byte = byte_slice[full_bytes];
-                const mask = (@as(u8, 1) << @truncate(remaining_bits)) - 1;
-                try list.append(last_byte & mask);
+            // Remove trailing zeros but keep at least one byte
+            // This avoids the wasteful pattern of removing all zeros then adding back a chunk
+            while (bitfield_bytes.items.len > 1 and bitfield_bytes.items[bitfield_bytes.items.len - 1] == 0) {
+                _ = bitfield_bytes.pop();
             }
 
-            const padding_size = (BYTES_PER_CHUNK - list.items.len % BYTES_PER_CHUNK) % BYTES_PER_CHUNK;
-            _ = try list.writer().write(zero_chunk[0..padding_size]);
+            // Pack bits into chunks (pad to chunk boundary)
+            const padding_size = (BYTES_PER_CHUNK - bitfield_bytes.items.len % BYTES_PER_CHUNK) % BYTES_PER_CHUNK;
+            _ = try bitfield_bytes.writer().write(zero_chunk[0..padding_size]);
 
-            const chunks = std.mem.bytesAsSlice(chunk, list.items);
+            const chunks = std.mem.bytesAsSlice(chunk, bitfield_bytes.items);
             var tmp: chunk = undefined;
-            try lib.merkleize(sha256, chunks, null, &tmp);
+
+            // Use chunk_count limit as per SSZ specification
+            const chunk_count_limit = (N + 255) / 256;
+            try lib.merkleize(sha256, chunks, chunk_count_limit, &tmp);
             lib.mixInLength2(tmp, bit_length, out);
         }
 

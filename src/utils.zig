@@ -283,7 +283,6 @@ pub fn Bitlist(comptime N: usize) type {
                 return;
             }
 
-            // pack_bits excludes delimiter bit
             var bitfield_bytes = ArrayList(u8).init(allctr);
             defer bitfield_bytes.deinit();
 

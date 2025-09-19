@@ -324,7 +324,7 @@ pub fn Bitlist(comptime N: usize) type {
             if (byte_len == 0) return;
 
             // Maximum possible bytes in a bitlist with provided bitlimit.
-            const max_bytes = (N >> 3) + 1;
+            const max_bytes = ((N + 8) >> 3);
             if (byte_len > max_bytes) {
                 return error.BitlistTooManyBytes;
             }

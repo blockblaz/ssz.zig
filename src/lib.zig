@@ -634,7 +634,13 @@ pub fn merkleize(hasher: type, chunks: []chunk, limit: ?usize, out: *[32]u8) any
     // Perform the merkelization
     switch (size) {
         0 => std.mem.copyForwards(u8, out.*[0..], hashes_of_zero[0][0..]),
-        1 => std.mem.copyForwards(u8, out.*[0..], chunks[0][0..]),
+        1 => {
+            if (chunks.len > 0) {
+                std.mem.copyForwards(u8, out.*[0..], chunks[0][0..]);
+            } else {
+                std.mem.copyForwards(u8, out.*[0..], hashes_of_zero[0][0..]);
+            }
+        },
         else => {
             // Merkleize the left side. If the number of chunks
             // isn't enough to fill the entire width, complete

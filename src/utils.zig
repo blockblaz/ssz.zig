@@ -123,12 +123,6 @@ pub fn List(comptime T: type, comptime N: usize) type {
         pub fn hashTreeRoot(self: *const Self, out: *[32]u8, allctr: Allocator) !void {
             const items = self.constSlice();
 
-            if (items.len == 0) {
-                const tmp: chunk = zero_chunk;
-                lib.mixInLength2(tmp, 0, out);
-                return;
-            }
-
             switch (@typeInfo(Item)) {
                 .int => {
                     var list = ArrayList(u8).init(allctr);
@@ -150,6 +144,8 @@ pub fn List(comptime T: type, comptime N: usize) type {
                         try lib.hashTreeRoot(Item, item, &tmp, allctr);
                         try chunks.append(tmp);
                     }
+                    // Always use N (max capacity) for merkleization, even when empty
+                    // This ensures proper tree depth according to SSZ specification
                     try lib.merkleize(sha256, chunks.items, N, &tmp);
                     lib.mixInLength2(tmp, items.len, out);
                 },
@@ -285,23 +281,20 @@ pub fn Bitlist(comptime N: usize) type {
 
         pub fn hashTreeRoot(self: *const Self, out: *[32]u8, allctr: Allocator) !void {
             const bit_length = self.length;
-            if (bit_length == 0) {
-                const tmp: chunk = zero_chunk;
-                lib.mixInLength2(tmp, 0, out);
-                return;
-            }
 
             var bitfield_bytes = ArrayList(u8).init(allctr);
             defer bitfield_bytes.deinit();
 
-            // Get the internal bit data since we don't store delimiter
-            const slice = self.inner.constSlice();
-            try bitfield_bytes.appendSlice(slice[0..slice.len]);
+            if (bit_length > 0) {
+                // Get the internal bit data since we don't store delimiter
+                const slice = self.inner.constSlice();
+                try bitfield_bytes.appendSlice(slice[0..slice.len]);
 
-            // Remove trailing zeros but keep at least one byte
-            // This avoids the wasteful pattern of removing all zeros then adding back a chunk
-            while (bitfield_bytes.items.len > 1 and bitfield_bytes.items[bitfield_bytes.items.len - 1] == 0) {
-                _ = bitfield_bytes.pop();
+                // Remove trailing zeros but keep at least one byte
+                // This avoids the wasteful pattern of removing all zeros then adding back a chunk
+                while (bitfield_bytes.items.len > 1 and bitfield_bytes.items[bitfield_bytes.items.len - 1] == 0) {
+                    _ = bitfield_bytes.pop();
+                }
             }
 
             // Pack bits into chunks (pad to chunk boundary)

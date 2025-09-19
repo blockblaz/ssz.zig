@@ -295,23 +295,9 @@ pub fn Bitlist(comptime N: usize) type {
             var bitfield_bytes = ArrayList(u8).init(allctr);
             defer bitfield_bytes.deinit();
 
-            // Get the internal bit data (without delimiter bit)
+            // Get the internal bit data since we don't store delimiter
             const slice = self.inner.constSlice();
-            if (slice.len > 0) {
-                // Append all bytes except the last one
-                if (slice.len > 1) {
-                    try bitfield_bytes.appendSlice(slice[0 .. slice.len - 1]);
-                }
-
-                // For the last byte, extract only the actual bits while excluding delimiter bit
-                const last_byte = slice[slice.len - 1];
-                const bits_in_last_byte = bit_length % 8;
-                if (bits_in_last_byte > 0) {
-                    // Mask out the delimiter bit and any unused bits
-                    const mask = (@as(u8, 1) << @intCast(bits_in_last_byte)) - 1;
-                    try bitfield_bytes.append(last_byte & mask);
-                }
-            }
+            try bitfield_bytes.appendSlice(slice[0..slice.len]);
 
             // Remove trailing zeros but keep at least one byte
             // This avoids the wasteful pattern of removing all zeros then adding back a chunk

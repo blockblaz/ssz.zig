@@ -280,7 +280,7 @@ pub fn Bitlist(comptime N: usize) type {
 
         pub fn serializedSize(self: *const Self) usize {
             // Size is number of bytes needed plus one bit for the sentinel
-            return (self.length + 8) / 8;
+            return (self.length + 7 + 1) / 8;
         }
 
         pub fn hashTreeRoot(self: *const Self, out: *[32]u8, allctr: Allocator) !void {
@@ -323,7 +323,7 @@ pub fn Bitlist(comptime N: usize) type {
             if (byte_len == 0) return;
 
             // Maximum possible bytes in a bitlist with provided bitlimit.
-            const max_bytes = ((N + 8) >> 3);
+            const max_bytes = ((N + 7 + 1) >> 3);
             if (byte_len > max_bytes) {
                 return error.BitlistTooManyBytes;
             }

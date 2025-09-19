@@ -32,16 +32,7 @@ pub fn build(b: *Builder) void {
     tests_tests.root_module.addImport("ssz.zig", mod);
     const run_tests_tests = b.addRunArtifact(tests_tests);
 
-    const beacon_tests = b.addTest(.{
-        .root_source_file = .{ .cwd_relative = "src/beacon_tests.zig" },
-        .optimize = optimize,
-        .target = target,
-    });
-    beacon_tests.root_module.addImport("ssz.zig", mod);
-    const run_beacon_tests = b.addRunArtifact(beacon_tests);
-
     const test_step = b.step("test", "Run library tests");
     test_step.dependOn(&run_main_tests.step);
     test_step.dependOn(&run_tests_tests.step);
-    test_step.dependOn(&run_beacon_tests.step);
 }

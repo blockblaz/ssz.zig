@@ -1538,3 +1538,8 @@ test "Bitlist validation - comprehensive style" {
         try expect(bitlist.length == 2); // Should have 2 actual data bits
     }
 }
+
+// Import beacon tests
+test {
+    _ = @import("beacon_tests.zig");
+}

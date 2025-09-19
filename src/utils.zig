@@ -305,21 +305,15 @@ pub fn Bitlist(comptime N: usize) type {
                 }
             }
 
-            // Remove trailing zeros
-            while (bitfield_bytes.items.len > 0 and bitfield_bytes.items[bitfield_bytes.items.len - 1] == 0) {
+            // Remove trailing zeros but keep at least one byte
+            // This avoids the wasteful pattern of removing all zeros then adding back a chunk
+            while (bitfield_bytes.items.len > 1 and bitfield_bytes.items[bitfield_bytes.items.len - 1] == 0) {
                 _ = bitfield_bytes.pop();
             }
 
-            // Handle edge case: if all bits are false, we end up with empty array
-            // In this case, we need at least one zero chunk for merkleization
-            if (bitfield_bytes.items.len == 0) {
-                // Add one zero chunk
-                try bitfield_bytes.appendSlice(zero_chunk[0..]);
-            } else {
-                // Pack bits into chunks (pad to chunk boundary)
-                const padding_size = (BYTES_PER_CHUNK - bitfield_bytes.items.len % BYTES_PER_CHUNK) % BYTES_PER_CHUNK;
-                _ = try bitfield_bytes.writer().write(zero_chunk[0..padding_size]);
-            }
+            // Pack bits into chunks (pad to chunk boundary)
+            const padding_size = (BYTES_PER_CHUNK - bitfield_bytes.items.len % BYTES_PER_CHUNK) % BYTES_PER_CHUNK;
+            _ = try bitfield_bytes.writer().write(zero_chunk[0..padding_size]);
 
             const chunks = std.mem.bytesAsSlice(chunk, bitfield_bytes.items);
             var tmp: chunk = undefined;

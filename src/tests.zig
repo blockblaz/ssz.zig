@@ -1332,6 +1332,53 @@ test "Bitlist edge cases" {
     try expect(std.mem.eql(u8, &hash2, &expected_true));
 }
 
+test "Bitlist trailing zeros optimization" {
+    const TestBitlist = utils.Bitlist(256);
+
+    // Test case 1: 8 false bits - should result in one 0x00 byte after pack_bits
+    var eight_false = try TestBitlist.init(0);
+    for (0..8) |_| {
+        try eight_false.append(false);
+    }
+
+    var hash1: [32]u8 = undefined;
+    try hashTreeRoot(TestBitlist, eight_false, &hash1, std.testing.allocator);
+
+    // Expected hash for 8 false bits in Bitlist[256]
+    // This should keep one zero byte and not remove all then add back a chunk
+    const expected_eight_false = [_]u8{
+        0x5a, 0xc7, 0x8d, 0x95, 0x32, 0x11, 0xaa, 0x82,
+        0x2c, 0x3a, 0xe6, 0xe9, 0xb0, 0x05, 0x8e, 0x42,
+        0x39, 0x4d, 0xd3, 0x2e, 0x59, 0x92, 0xf2, 0x9f,
+        0x9c, 0x12, 0xda, 0x36, 0x81, 0x98, 0x51, 0x30,
+    };
+    try expect(std.mem.eql(u8, &hash1, &expected_eight_false));
+
+    // Test case 2: Pattern with trailing zeros but non-zero first byte
+    var pattern = try TestBitlist.init(0);
+    try pattern.append(true);
+    try pattern.append(false);
+    try pattern.append(true);
+    // Add 13 false bits to get 16 total
+    for (0..13) |_| {
+        try pattern.append(false);
+    }
+
+    var hash2: [32]u8 = undefined;
+    try hashTreeRoot(TestBitlist, pattern, &hash2, std.testing.allocator);
+
+    // Expected hash for [T,F,T,F...F] (16 bits total)
+    // First byte is 0x05, second byte is 0x00
+    // Should remove only the second zero byte
+    const expected_pattern = [_]u8{
+        0x94, 0x30, 0xdb, 0x52, 0x07, 0x85, 0xa6, 0x68,
+        0x94, 0xde, 0xd7, 0x55, 0x2e, 0x5e, 0x86, 0x2e,
+        0xde, 0x23, 0x18, 0x92, 0xaa, 0x19, 0xb3, 0x0e,
+        0x4a, 0xb4, 0xbd, 0xae, 0x9b, 0x7d, 0x02, 0xec,
+    };
+    try expect(std.mem.eql(u8, &hash2, &expected_pattern));
+}
+
 test "uint256 hash tree root" {
     const data: u256 = 0x0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF;
 

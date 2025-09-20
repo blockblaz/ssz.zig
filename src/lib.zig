@@ -634,8 +634,6 @@ pub fn merkleize(hasher: type, chunks: []chunk, limit: ?usize, out: *[32]u8) any
     // Perform the merkelization
     switch (size) {
         0 => std.mem.copyForwards(u8, out.*[0..], hashes_of_zero[0][0..]),
-        // if chunks is empty, we are here as a result of recursive subtree hashing in which case
-        // return first hashes_of_zero
         1 => std.mem.copyForwards(u8, out.*[0..], (if (chunks.len > 0) chunks[0] else hashes_of_zero[0])[0..]),
         else => {
             // Merkleize the left side. If the number of chunks

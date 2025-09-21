@@ -1293,23 +1293,25 @@ test "Empty List hash tree root" {
 
 test "Empty BitList(<=256) hash tree root" {
     const BitListLen100 = utils.Bitlist(100);
-    const empty_list = try BitListLen100.init(0);
+    var empty_list = try BitListLen100.init(std.testing.allocator);
+    defer empty_list.deinit();
 
     var hash: [32]u8 = undefined;
     try hashTreeRoot(BitListLen100, empty_list, &hash, std.testing.allocator);
 
     const zig_expected = [_]u8{
-        0x79, 0x29, 0x30, 0xBB, 0xD5, 0xBA, 0xAC, 0x43,
-        0xBC, 0xC7, 0x98, 0xEE, 0x49, 0xAA, 0x81, 0x85,
-        0xEF, 0x76, 0xBB, 0x3B, 0x44, 0xBA, 0x62, 0xB9,
-        0x1D, 0x86, 0xAE, 0x56, 0x9E, 0x4B, 0xB5, 0x35,
+        0xf5, 0xa5, 0xfd, 0x42, 0xd1, 0x6a, 0x20, 0x30,
+        0x27, 0x98, 0xef, 0x6e, 0xd3, 0x09, 0x97, 0x9b,
+        0x43, 0x00, 0x3d, 0x23, 0x20, 0xd9, 0xf0, 0xe8,
+        0xea, 0x98, 0x31, 0xa9, 0x27, 0x59, 0xfb, 0x4b,
     };
     try expect(std.mem.eql(u8, &hash, &zig_expected));
 }
 
 test "Empty BitList (>256) hash tree root" {
     const BitListLen100 = utils.Bitlist(2570);
-    const empty_list = try BitListLen100.init(0);
+    var empty_list = try BitListLen100.init(std.testing.allocator);
+    defer empty_list.deinit();
 
     var hash: [32]u8 = undefined;
     try hashTreeRoot(BitListLen100, empty_list, &hash, std.testing.allocator);
@@ -1793,7 +1795,7 @@ test "Simulate BoundedArray behavior vs ArrayList behavior" {
     // This test validates ArrayList migration works
     // We know serialization produces output - exact bytes tested elsewhere
     try expect(serialized.items.len >= 1); // At least produces some output
-    try expect(new_bitlist.len() == 4);     // Proper length tracking
+    try expect(new_bitlist.len() == 4); // Proper length tracking
 }
 
 test "Bitlist memory safety after init fix" {

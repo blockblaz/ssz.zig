@@ -1264,6 +1264,38 @@ test "Empty List hash tree root" {
     try expect(std.mem.eql(u8, &hash, &zig_expected));
 }
 
+test "Empty BitList(<=256) hash tree root" {
+    const BitListLen100 = utils.Bitlist(100);
+    const empty_list = try BitListLen100.init(0);
+
+    var hash: [32]u8 = undefined;
+    try hashTreeRoot(BitListLen100, empty_list, &hash, std.testing.allocator);
+
+    const zig_expected = [_]u8{
+        0xf5, 0xa5, 0xfd, 0x42, 0xd1, 0x6a, 0x20, 0x30,
+        0x27, 0x98, 0xef, 0x6e, 0xd3, 0x09, 0x97, 0x9b,
+        0x43, 0x00, 0x3d, 0x23, 0x20, 0xd9, 0xf0, 0xe8,
+        0xea, 0x98, 0x31, 0xa9, 0x27, 0x59, 0xfb, 0x4b,
+    };
+    try expect(std.mem.eql(u8, &hash, &zig_expected));
+}
+
+test "Empty BitList (>256) hash tree root" {
+    const BitListLen100 = utils.Bitlist(2570);
+    const empty_list = try BitListLen100.init(0);
+
+    var hash: [32]u8 = undefined;
+    try hashTreeRoot(BitListLen100, empty_list, &hash, std.testing.allocator);
+
+    const zig_expected = [_]u8{
+        0x79, 0x29, 0x30, 0xbb, 0xd5, 0xba, 0xac, 0x43,
+        0xbc, 0xc7, 0x98, 0xee, 0x49, 0xaa, 0x81, 0x85,
+        0xef, 0x76, 0xbb, 0x3b, 0x44, 0xba, 0x62, 0xb9,
+        0x1d, 0x86, 0xae, 0x56, 0x9e, 0x4b, 0xb5, 0x35,
+    };
+    try expect(std.mem.eql(u8, &hash, &zig_expected));
+}
+
 test "List at maximum capacity" {
     const ListU8 = utils.List(u8, 4);
     var full_list = try ListU8.init(0);

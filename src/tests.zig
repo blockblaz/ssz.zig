@@ -56,6 +56,7 @@ test "serializes a int32" {
 test "non-byte aligned int serialization fails" {
     const data: u10 = 0x03ff;
     var list = ArrayList(u8).init(std.testing.allocator);
+    defer list.deinit();
     try std.testing.expectError(error.InvalidSerializedIntLengthType, serialize(u10, data, &list));
 }
 

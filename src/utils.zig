@@ -32,7 +32,7 @@ pub fn List(comptime T: type, comptime N: usize) type {
         inner: Inner,
 
         pub fn sszEncode(self: *const Self, l: *ArrayList(u8)) !void {
-            try serialize([]const Item, self.inner.items, l);
+            try serialize([]const Item, self.constSlice(), l);
         }
 
         pub fn isFixedSizeObject() bool {
@@ -95,7 +95,7 @@ pub fn List(comptime T: type, comptime N: usize) type {
         }
 
         pub fn eql(self: *const Self, other: *Self) bool {
-            return std.mem.eql(Self.Item, self.inner.items, other.inner.items);
+            return std.mem.eql(Self.Item, self.constSlice(), other.constSlice());
         }
 
         pub fn deinit(self: *Self) void {
@@ -137,12 +137,12 @@ pub fn List(comptime T: type, comptime N: usize) type {
         }
 
         pub fn serializedSize(self: *const Self) !usize {
-            const inner_slice = self.inner.items;
+            const inner_slice = self.constSlice();
             return lib.serializedSize(@TypeOf(inner_slice), inner_slice);
         }
 
         pub fn hashTreeRoot(self: *const Self, out: *[32]u8, allctr: Allocator) !void {
-            const items = self.inner.items;
+            const items = self.constSlice();
 
             switch (@typeInfo(Item)) {
                 .int => {

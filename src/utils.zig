@@ -42,7 +42,17 @@ pub fn List(comptime T: type, comptime N: usize) type {
         pub fn sszDecode(serialized: []const u8, out: *Self, allocator: ?std.mem.Allocator) !void {
             // BitList[N] or regular List[N]?
             const alloc = allocator orelse return error.AllocatorRequired;
-            out.* = try init(alloc, 0);
+            out.* = try init(alloc);
+
+            // FastSSZ-style capacity optimization: pre-allocate based on input size
+            if (serialized.len > 0) {
+                const estimated_capacity = if (try lib.isFixedSizeObject(Self.Item))
+                    serialized.len / (try lib.serializedFixedSize(Self.Item))
+                else
+                    serialized.len / 8; // Conservative estimate for dynamic types
+                try out.inner.ensureTotalCapacity(estimated_capacity);
+            }
+
             if (Self.Item == bool) {
                 @panic("Use the optimized utils.Bitlist(N) instead of utils.List(bool, N)");
             } else if (try lib.isFixedSizeObject(Self.Item)) {
@@ -80,12 +90,8 @@ pub fn List(comptime T: type, comptime N: usize) type {
             }
         }
 
-        pub fn init(allocator: Allocator, capacity: usize) !Self {
-            var inner = Inner.init(allocator);
-            if (capacity > 0) {
-                try inner.ensureTotalCapacity(capacity);
-            }
-            return .{ .inner = inner };
+        pub fn init(allocator: Allocator) !Self {
+            return .{ .inner = Inner.init(allocator) };
         }
 
         pub fn eql(self: *const Self, other: *Self) bool {
@@ -97,6 +103,7 @@ pub fn List(comptime T: type, comptime N: usize) type {
         }
 
         pub fn append(self: *Self, item: Self.Item) error{ Overflow, OutOfMemory }!void {
+            if (self.inner.items.len >= N) return error.Overflow;
             return self.inner.append(item);
         }
 
@@ -109,16 +116,19 @@ pub fn List(comptime T: type, comptime N: usize) type {
         }
 
         pub fn fromSlice(allocator: Allocator, m: []const T) !Self {
+            if (m.len > N) return error.Overflow;
             var inner = Inner.init(allocator);
             try inner.appendSlice(m);
             return .{ .inner = inner };
         }
 
         pub fn get(self: Self, i: usize) T {
+            if (i >= self.inner.items.len) @panic("index out of bounds");
             return self.inner.items[i];
         }
 
         pub fn set(self: *Self, i: usize, item: T) void {
+            if (i >= self.inner.items.len) @panic("index out of bounds");
             self.inner.items[i] = item;
         }
 
@@ -219,7 +229,7 @@ pub fn Bitlist(comptime N: usize) type {
 
         pub fn sszDecode(serialized: []const u8, out: *Self, allocator: ?std.mem.Allocator) !void {
             const alloc = allocator orelse return error.AllocatorRequired;
-            out.* = try init(alloc, 0);
+            out.* = try init(alloc);
 
             // Comprehensive validation (handles empty, trailing zero, size limits)
             try Self.validateBitlist(serialized);
@@ -227,6 +237,12 @@ pub fn Bitlist(comptime N: usize) type {
             // If validation passed but buffer is empty, we're done
             if (serialized.len == 0) {
                 return;
+            }
+
+            // FastSSZ-style capacity optimization: pre-allocate based on input size
+            const byte_capacity = serialized.len;
+            if (byte_capacity > 0) {
+                try out.inner.ensureTotalCapacity(byte_capacity);
             }
 
             // Parse the bit structure (validation already confirmed it's valid)
@@ -251,13 +267,8 @@ pub fn Bitlist(comptime N: usize) type {
             return false;
         }
 
-        pub fn init(allocator: Allocator, length: usize) !Self {
-            var inner = Inner.init(allocator);
-            const byte_capacity = (length + 7) / 8;
-            if (byte_capacity > 0) {
-                try inner.ensureTotalCapacity(byte_capacity);
-            }
-            return .{ .inner = inner, .length = 0 };
+        pub fn init(allocator: Allocator) !Self {
+            return .{ .inner = Inner.init(allocator), .length = 0 };
         }
 
         pub fn get(self: Self, i: usize) bool {
@@ -270,12 +281,18 @@ pub fn Bitlist(comptime N: usize) type {
         }
 
         pub fn set(self: *Self, i: usize, bit: bool) void {
+            if (i >= self.length) {
+                var buf: [1024]u8 = undefined;
+                const str = std.fmt.bufPrint(&buf, "out of bounds: want index {}, len {}", .{ i, self.length }) catch unreachable;
+                @panic(str);
+            }
             const mask = ~@shlExact(@as(u8, 1), @truncate(i % 8));
             const b = if (bit) @shlExact(@as(u8, 1), @truncate(i % 8)) else 0;
             self.inner.items[i / 8] = @truncate((self.inner.items[i / 8] & mask) | b);
         }
 
         pub fn append(self: *Self, item: bool) error{ Overflow, OutOfMemory }!void {
+            if (self.length >= N) return error.Overflow;
             if (self.length % 8 == 0) {
                 try self.inner.append(0);
             }
@@ -284,7 +301,7 @@ pub fn Bitlist(comptime N: usize) type {
         }
 
         pub fn len(self: *const Self) usize {
-            return if (self.length > N) N else self.length;
+            return self.length;
         }
 
         pub fn deinit(self: *Self) void {

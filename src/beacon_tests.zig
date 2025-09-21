@@ -128,8 +128,8 @@ test "List[Validator] serialization and hash tree root" {
     const MAX_VALIDATORS = 100;
     const ValidatorList = utils.List(Validator, MAX_VALIDATORS);
 
-    var validator_list = try ValidatorList.init(std.testing.allocator, 0);
-    defer validator_list.inner.deinit();
+    var validator_list = try ValidatorList.init(std.testing.allocator);
+    defer validator_list.deinit();
 
     // Add test validators
     const validator1 = Validator{
@@ -167,8 +167,8 @@ test "List[Validator] serialization and hash tree root" {
     try expect(std.mem.eql(u8, list.items, &expected_validator_list_bytes));
 
     // Test deserialization
-    var deserialized_list = try ValidatorList.init(std.testing.allocator, 0);
-    defer deserialized_list.inner.deinit();
+    var deserialized_list = try ValidatorList.init(std.testing.allocator);
+    defer deserialized_list.deinit();
     try deserialize(ValidatorList, list.items, &deserialized_list, std.testing.allocator);
 
     try expect(validator_list.len() == deserialized_list.len());
@@ -236,8 +236,8 @@ test "BeamBlockBody with validator array - full cycle" {
     };
 
     // Create validator array
-    var validators = try ValidatorArray.init(std.testing.allocator, 0);
-    defer validators.inner.deinit();
+    var validators = try ValidatorArray.init(std.testing.allocator);
+    defer validators.deinit();
     try validators.append(validator1);
     try validators.append(validator2);
 
@@ -257,8 +257,8 @@ test "BeamBlockBody with validator array - full cycle" {
 
     // Test deserialization
     var deserialized_body: BeamBlockBody = undefined;
-    deserialized_body.validators = try ValidatorArray.init(std.testing.allocator, 0);
-    defer deserialized_body.validators.inner.deinit();
+    deserialized_body.validators = try ValidatorArray.init(std.testing.allocator);
+    defer deserialized_body.validators.deinit();
     try deserialize(BeamBlockBody, serialized_data.items, &deserialized_body, std.testing.allocator);
 
     // Verify deserialization correctness
@@ -332,8 +332,8 @@ test "Zeam-style List/Bitlist usage with tree root stability" {
         justified_slots: JustifiedSlots,
     };
 
-    var votes = try Mini3SFVotes.init(std.testing.allocator, 0);
-    defer votes.inner.deinit();
+    var votes = try Mini3SFVotes.init(std.testing.allocator);
+    defer votes.deinit();
     try votes.append(Mini3SFVote{
         .validator_id = 1,
         .slot = 10,
@@ -342,13 +342,13 @@ test "Zeam-style List/Bitlist usage with tree root stability" {
         .source = Mini3SFCheckpoint{ .root = [_]u8{3} ** 32, .slot = 8 },
     });
 
-    var hashes = try HistoricalBlockHashes.init(std.testing.allocator, 0);
-    defer hashes.inner.deinit();
+    var hashes = try HistoricalBlockHashes.init(std.testing.allocator);
+    defer hashes.deinit();
     try hashes.append([_]u8{0xaa} ** 32);
     try hashes.append([_]u8{0xbb} ** 32);
 
-    var bitlist = try JustifiedSlots.init(std.testing.allocator, 0);
-    defer bitlist.inner.deinit();
+    var bitlist = try JustifiedSlots.init(std.testing.allocator);
+    defer bitlist.deinit();
     try bitlist.append(true);
     try bitlist.append(false);
     try bitlist.append(true);
@@ -415,8 +415,8 @@ test "BeamState with historical roots - comprehensive test" {
         finalized_checkpoint_root: Root,
     };
 
-    var historical_roots = try utils.List(Root, MAX_HISTORICAL_ROOTS).init(std.testing.allocator, 0);
-    defer historical_roots.inner.deinit();
+    var historical_roots = try utils.List(Root, MAX_HISTORICAL_ROOTS).init(std.testing.allocator);
+    defer historical_roots.deinit();
 
     try historical_roots.append([_]u8{0x01} ** 32);
     try historical_roots.append([_]u8{0x02} ** 32);
@@ -460,8 +460,8 @@ test "BeamState with historical roots - comprehensive test" {
 
     // Test deserialization
     var deserialized_state: BeamState = undefined;
-    deserialized_state.historical_roots = try utils.List(Root, MAX_HISTORICAL_ROOTS).init(std.testing.allocator, 0);
-    defer deserialized_state.historical_roots.inner.deinit();
+    deserialized_state.historical_roots = try utils.List(Root, MAX_HISTORICAL_ROOTS).init(std.testing.allocator);
+    defer deserialized_state.historical_roots.deinit();
     try deserialize(BeamState, serialized_data.items, &deserialized_state, std.testing.allocator);
 
     // Verify all fields match
@@ -506,8 +506,7 @@ test "BeamState with empty historical roots" {
     };
 
     // Create BeamState with empty historical roots
-    const empty_historical_roots = try utils.List(Root, MAX_HISTORICAL_ROOTS).init(std.testing.allocator, 0);
-    defer empty_historical_roots.inner.deinit();
+    const empty_historical_roots = try utils.List(Root, MAX_HISTORICAL_ROOTS).init(std.testing.allocator);
 
     const beam_state = SimpleBeamState{
         .slot = 0,
@@ -535,7 +534,7 @@ test "BeamState with empty historical roots" {
 
     // Test deserialization
     var deserialized_state: SimpleBeamState = undefined;
-    deserialized_state.historical_roots = try utils.List(Root, MAX_HISTORICAL_ROOTS).init(std.testing.allocator, 0);
+    deserialized_state.historical_roots = try utils.List(Root, MAX_HISTORICAL_ROOTS).init(std.testing.allocator);
     try deserialize(SimpleBeamState, serialized_data.items, &deserialized_state, std.testing.allocator);
 
     // Verify all fields match
@@ -563,8 +562,8 @@ test "BeamState with maximum historical roots" {
     };
 
     // Create BeamState with maximum historical roots
-    var max_historical_roots = try utils.List(Root, MAX_HISTORICAL_ROOTS).init(std.testing.allocator, 0);
-    defer max_historical_roots.inner.deinit();
+    var max_historical_roots = try utils.List(Root, MAX_HISTORICAL_ROOTS).init(std.testing.allocator);
+    defer max_historical_roots.deinit();
 
     // Fill to maximum capacity
     for (0..MAX_HISTORICAL_ROOTS) |i| {
@@ -601,8 +600,8 @@ test "BeamState with maximum historical roots" {
 
     // Test deserialization
     var deserialized_state: MaxBeamState = undefined;
-    deserialized_state.historical_roots = try utils.List(Root, MAX_HISTORICAL_ROOTS).init(std.testing.allocator, 0);
-    defer deserialized_state.historical_roots.inner.deinit();
+    deserialized_state.historical_roots = try utils.List(Root, MAX_HISTORICAL_ROOTS).init(std.testing.allocator);
+    defer deserialized_state.historical_roots.deinit();
     try deserialize(MaxBeamState, serialized_data.items, &deserialized_state, std.testing.allocator);
 
     // Verify maximum capacity
@@ -634,8 +633,8 @@ test "BeamState historical roots access and comparison" {
         metadata: u64,
     };
 
-    var historical_roots = try utils.List(Root, MAX_HISTORICAL_ROOTS).init(std.testing.allocator, 0);
-    defer historical_roots.inner.deinit();
+    var historical_roots = try utils.List(Root, MAX_HISTORICAL_ROOTS).init(std.testing.allocator);
+    defer historical_roots.deinit();
 
     // Add roots with specific patterns
     const test_patterns = [_][32]u8{
@@ -680,8 +679,8 @@ test "BeamState historical roots access and comparison" {
 
     // Test deserialization
     var deserialized_state: AccessBeamState = undefined;
-    deserialized_state.historical_roots = try utils.List(Root, MAX_HISTORICAL_ROOTS).init(std.testing.allocator, 0);
-    defer deserialized_state.historical_roots.inner.deinit();
+    deserialized_state.historical_roots = try utils.List(Root, MAX_HISTORICAL_ROOTS).init(std.testing.allocator);
+    defer deserialized_state.historical_roots.deinit();
     try deserialize(AccessBeamState, serialized_data.items, &deserialized_state, std.testing.allocator);
 
     // Test individual root access and comparison
@@ -722,7 +721,7 @@ test "SimpleBeamState with empty historical roots" {
     };
 
     // Create BeamState with empty historical roots
-    const empty_historical_roots = try utils.List(Root, MAX_HISTORICAL_ROOTS).init(std.testing.allocator, 0);
+    const empty_historical_roots = try utils.List(Root, MAX_HISTORICAL_ROOTS).init(std.testing.allocator);
 
     const beam_state = SimpleBeamState{
         .slot = 0,
@@ -749,7 +748,7 @@ test "SimpleBeamState with empty historical roots" {
 
     // Test deserialization
     var deserialized_state: SimpleBeamState = undefined;
-    deserialized_state.historical_roots = try utils.List(Root, MAX_HISTORICAL_ROOTS).init(std.testing.allocator, 0);
+    deserialized_state.historical_roots = try utils.List(Root, MAX_HISTORICAL_ROOTS).init(std.testing.allocator);
     try deserialize(SimpleBeamState, serialized_data.items, &deserialized_state, std.testing.allocator);
 
     // Verify all fields match

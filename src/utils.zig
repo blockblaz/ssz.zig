@@ -39,6 +39,10 @@ pub fn List(comptime T: type, comptime N: usize) type {
             return false;
         }
 
+        pub fn getDefault() Self {
+            return Self{ .inner = Inner.init(0) catch unreachable };
+        }
+
         pub fn sszDecode(serialized: []const u8, out: *Self, allocator: ?std.mem.Allocator) !void {
             // BitList[N] or regular List[N]?
             out.* = try init(0);
@@ -237,6 +241,10 @@ pub fn Bitlist(comptime N: usize) type {
 
         pub fn isFixedSizeObject() bool {
             return false;
+        }
+
+        pub fn getDefault() Self {
+            return Self{ .inner = Inner.init(0) catch unreachable, .length = 0 };
         }
 
         pub fn init(length: usize) error{Overflow}!Self {

@@ -863,6 +863,56 @@ pub fn hashTreeRoot(comptime T: type, value: T, out: *[32]u8, allctr: Allocator)
     }
 }
 
+/// Returns a default/empty value for any SSZ-supported type
+pub fn getDefault(comptime T: type) T {
+    // Check if type has its own getDefault method first
+    if (comptime std.meta.hasFn(T, "getDefault")) {
+        return T.getDefault();
+    }
+
+    const info = @typeInfo(T);
+    return switch (info) {
+        .bool => false,
+        .int => 0,
+        .float => 0.0,
+        .null => {},
+        .void => {},
+        .array => |array| blk: {
+            var result: T = undefined;
+            for (0..array.len) |i| {
+                result[i] = getDefault(array.child);
+            }
+            break :blk result;
+        },
+        .pointer => |ptr| switch (ptr.size) {
+            .slice => &[0]ptr.child{}, // Empty slice
+            .one => unreachable, // Single pointers don't have a meaningful default
+            else => @compileError("Unsupported pointer type for getDefault"),
+        },
+        .optional => null,
+        .@"struct" => |str| blk: {
+            var result: T = undefined;
+            inline for (str.fields) |field| {
+                @field(result, field.name) = getDefault(field.type);
+            }
+            break :blk result;
+        },
+        .@"union" => |u| blk: {
+            if (u.tag_type == null) {
+                @compileError("Cannot create default for untagged union");
+            }
+            // Return the first variant with its default value
+            const first_field = u.fields[0];
+            break :blk @unionInit(T, first_field.name, getDefault(first_field.type));
+        },
+        .@"enum" => blk: {
+            // Return the first enum value (typically represents zero/default)
+            break :blk @enumFromInt(0);
+        },
+        else => @compileError("getDefault not supported for type " ++ @typeName(T)),
+    };
+}
+
 // used at comptime to generate a bitvector from a byte vector
 fn bytesToBits(comptime N: usize, src: [N]u8) [N * 8]bool {
     var bitvector: [N * 8]bool = undefined;

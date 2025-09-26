@@ -6,6 +6,7 @@ const serializedSize = libssz.serializedSize;
 const chunkCount = libssz.chunkCount;
 const hashTreeRoot = libssz.hashTreeRoot;
 const isFixedSizeObject = libssz.isFixedSizeObject;
+const getDefault = libssz.getDefault;
 const std = @import("std");
 const ArrayList = std.ArrayList;
 const expect = std.testing.expect;
@@ -1666,6 +1667,168 @@ test "Bitlist validation - comprehensive style" {
         try deserialize(utils.Bitlist(8), &valid, &bitlist, null);
         try expect(bitlist.length == 2); // Should have 2 actual data bits
     }
+}
+
+// Test getDefault function for various types
+test "getDefault basic types" {
+    // Test basic types
+    const default_bool = getDefault(bool);
+    try expect(default_bool == false);
+
+    const default_u8 = getDefault(u8);
+    try expect(default_u8 == 0);
+
+    const default_u16 = getDefault(u16);
+    try expect(default_u16 == 0);
+
+    const default_u32 = getDefault(u32);
+    try expect(default_u32 == 0);
+
+    const default_u64 = getDefault(u64);
+    try expect(default_u64 == 0);
+
+    const default_i32 = getDefault(i32);
+    try expect(default_i32 == 0);
+}
+
+test "getDefault arrays" {
+    // Test array of bools
+    const default_bool_array = getDefault([8]bool);
+    for (default_bool_array) |bit| {
+        try expect(bit == false);
+    }
+
+    // Test array of integers
+    const default_u32_array = getDefault([4]u32);
+    for (default_u32_array) |val| {
+        try expect(val == 0);
+    }
+
+    // Test nested arrays
+    const default_nested = getDefault([2][3]u8);
+    for (default_nested) |inner| {
+        for (inner) |val| {
+            try expect(val == 0);
+        }
+    }
+}
+
+test "getDefault slices" {
+    // Test slice types - should return empty slices
+    const default_u8_slice = getDefault([]u8);
+    try expect(default_u8_slice.len == 0);
+
+    const default_u32_slice = getDefault([]u32);
+    try expect(default_u32_slice.len == 0);
+
+    const default_bool_slice = getDefault([]bool);
+    try expect(default_bool_slice.len == 0);
+}
+
+test "getDefault optional types" {
+    const default_optional_u32 = getDefault(?u32);
+    try expect(default_optional_u32 == null);
+
+    const default_optional_bool = getDefault(?bool);
+    try expect(default_optional_bool == null);
+}
+
+test "getDefault structs" {
+    const TestStruct = struct {
+        a: u32,
+        b: bool,
+        c: u16,
+    };
+
+    const default_struct = getDefault(TestStruct);
+    try expect(default_struct.a == 0);
+    try expect(default_struct.b == false);
+    try expect(default_struct.c == 0);
+}
+
+test "getDefault struct with defaults" {
+    const StructWithDefaults = struct {
+        a: u32 = 42,
+        b: bool,
+        c: u16 = 1337,
+    };
+
+    const default_struct = getDefault(StructWithDefaults);
+    // getDefault creates zero-value defaults, not struct field defaults
+    try expect(default_struct.a == 0);
+    try expect(default_struct.b == false);
+    try expect(default_struct.c == 0);
+}
+
+test "getDefault nested structs" {
+    const Inner = struct {
+        x: u32,
+        y: bool,
+    };
+
+    const Outer = struct {
+        inner: Inner,
+        z: u16,
+    };
+
+    const default_outer = getDefault(Outer);
+    try expect(default_outer.inner.x == 0);
+    try expect(default_outer.inner.y == false);
+    try expect(default_outer.z == 0);
+}
+
+test "getDefault tagged unions" {
+    const TestUnion = union(enum) {
+        int_val: u32,
+        bool_val: bool,
+        string_val: []const u8,
+    };
+
+    const default_union = getDefault(TestUnion);
+    // Should be the first variant with its default value
+    try expect(std.meta.activeTag(default_union) == .int_val);
+    try expect(default_union.int_val == 0);
+}
+
+test "getDefault enums" {
+    const TestEnum = enum(u8) {
+        first = 0,
+        second = 1,
+        third = 2,
+    };
+
+    const default_enum = getDefault(TestEnum);
+    try expect(default_enum == .first);
+}
+
+test "getDefault SSZ List container" {
+    const default_list = getDefault(utils.List(u32, 100));
+    try expect(default_list.len() == 0);
+}
+
+test "getDefault SSZ Bitlist container" {
+    const default_bitlist = getDefault(utils.Bitlist(256));
+    try expect(default_bitlist.len() == 0);
+    try expect(default_bitlist.length == 0);
+}
+
+test "getDefault complex struct with SSZ containers" {
+    const ComplexStruct = struct {
+        list: utils.List(u32, 50),
+        bitlist: utils.Bitlist(128),
+        array: [4]u16,
+        optional: ?u32,
+    };
+
+    const default_complex = getDefault(ComplexStruct);
+    try expect(default_complex.list.len() == 0);
+    try expect(default_complex.bitlist.len() == 0);
+
+    for (default_complex.array) |val| {
+        try expect(val == 0);
+    }
+
+    try expect(default_complex.optional == null);
 }
 
 // Import beacon tests

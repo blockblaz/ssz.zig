@@ -886,7 +886,7 @@ pub fn getDefault(comptime T: type) T {
         },
         .pointer => |ptr| switch (ptr.size) {
             .slice => &[0]ptr.child{}, // Empty slice
-            .one => unreachable, // Single pointers don't have a meaningful default
+            .one => @compileError("Single pointers (*T) do not have a default SSZ value. Consider using an optional type (?*T)."),
             else => @compileError("Unsupported pointer type for getDefault"),
         },
         .optional => null,
@@ -905,9 +905,14 @@ pub fn getDefault(comptime T: type) T {
             const first_field = u.fields[0];
             break :blk @unionInit(T, first_field.name, getDefault(first_field.type));
         },
-        .@"enum" => blk: {
-            // Return the first enum value (typically represents zero/default)
-            break :blk @enumFromInt(0);
+        .@"enum" => |e| blk: {
+            // SSZ has no dedicated enum type. For Zig enums in our library,
+            // we use the first declared field as the default.
+            if (e.fields.len == 0) {
+                @compileError("Cannot get default for enum with no variants: " ++ @typeName(T));
+            }
+            const first_field_name = e.fields[0].name;
+            break :blk @field(T, first_field_name);
         },
         else => @compileError("getDefault not supported for type " ++ @typeName(T)),
     };

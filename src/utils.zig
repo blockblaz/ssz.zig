@@ -40,7 +40,7 @@ pub fn List(comptime T: type, comptime N: usize) type {
         }
 
         pub fn getDefault() Self {
-            return Self{ .inner = Inner.init(0) catch unreachable };
+            return Self{ .inner = Inner.init(0) catch @panic("Unexpected error initializing BoundedArray with length 0") };
         }
 
         pub fn sszDecode(serialized: []const u8, out: *Self, allocator: ?std.mem.Allocator) !void {
@@ -244,7 +244,7 @@ pub fn Bitlist(comptime N: usize) type {
         }
 
         pub fn getDefault() Self {
-            return Self{ .inner = Inner.init(0) catch unreachable, .length = 0 };
+            return Self{ .inner = Inner.init(0) catch @panic("Unexpected error initializing BoundedArray with length 0"), .length = 0 };
         }
 
         pub fn init(length: usize) error{Overflow}!Self {

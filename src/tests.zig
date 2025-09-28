@@ -1801,6 +1801,30 @@ test "getDefault enums" {
     try expect(default_enum == .first);
 }
 
+test "getDefault enums without zero value" {
+    const NonZeroEnum = enum(u8) {
+        one = 1,
+        two = 2,
+        three = 3,
+    };
+
+    const default_enum = getDefault(NonZeroEnum);
+    // The default should be the first declared variant, not based on integer value
+    try expect(default_enum == .one);
+}
+
+test "getDefault enums with arbitrary values" {
+    const ArbitraryEnum = enum(u16) {
+        alpha = 100,
+        beta = 200,
+        gamma = 42,
+    };
+
+    const default_enum = getDefault(ArbitraryEnum);
+    // Should always be the first declared field regardless of its integer value
+    try expect(default_enum == .alpha);
+}
+
 test "getDefault SSZ List container" {
     const default_list = getDefault(utils.List(u32, 100));
     try expect(default_list.len() == 0);

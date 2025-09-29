@@ -691,7 +691,7 @@ test "(de)serialize List[N] of variable-length objects" {
         try string_list.append(try std.fmt.allocPrint(std.testing.allocator, "count={}", .{i}));
     }
     defer for (0..string_list.len()) |i| {
-        std.testing.allocator.free(string_list.get(i));
+        std.testing.allocator.free(string_list.get(i) catch unreachable);
     };
     var list = ArrayList(u8).init(std.testing.allocator);
     defer list.deinit();
@@ -701,7 +701,7 @@ test "(de)serialize List[N] of variable-length objects" {
     try deserialize(ListOfStrings, list.items, &string_list_deser, std.testing.allocator);
     try expect(string_list.len() == string_list_deser.len());
     for (0..string_list.len()) |i| {
-        try expect(std.mem.eql(u8, string_list.get(i), string_list_deser.get(i)));
+        try expect(std.mem.eql(u8, try string_list.get(i), try string_list_deser.get(i)));
     }
 }
 
@@ -713,8 +713,8 @@ test "List[N].fromSlice of structs" {
     var pastry_list = try PastryList.fromSlice(std.testing.allocator, pastries[start..end]);
     defer pastry_list.deinit();
     for (pastries, 0..) |pastry, i| {
-        try expect(std.mem.eql(u8, pastry_list.get(i).name, pastry.name));
-        try expect(pastry_list.get(i).weight == pastry.weight);
+        try expect(std.mem.eql(u8, (try pastry_list.get(i)).name, pastry.name));
+        try expect((try pastry_list.get(i)).weight == pastry.weight);
     }
 }
 
@@ -724,8 +724,8 @@ test "(de)serialization of Bitlist[N]" {
     try bitlist.append(true);
     try bitlist.append(false);
     try bitlist.append(true);
-    try expect(bitlist.get(1) == false);
-    try expect(bitlist.get(2) == true);
+    try expect(try bitlist.get(1) == false);
+    try expect(try bitlist.get(2) == true);
 
     var list = ArrayList(u8).init(std.testing.allocator);
     defer list.deinit();
@@ -741,8 +741,8 @@ test "(de)serialization of Bitlist[N] when N % 8 != 0" {
     try bitlist.append(true);
     try bitlist.append(false);
     try bitlist.append(true);
-    try expect(bitlist.get(1) == false);
-    try expect(bitlist.get(2) == true);
+    try expect(try bitlist.get(1) == false);
+    try expect(try bitlist.get(2) == true);
 
     var list = ArrayList(u8).init(std.testing.allocator);
     defer list.deinit();
@@ -793,8 +793,8 @@ test "(de)serialization of full Bitlist[N] when N % 8 == 0" {
     try bitlist.append(false);
     try bitlist.append(false);
     try bitlist.append(false);
-    try expect(bitlist.get(1) == false);
-    try expect(bitlist.get(2) == true);
+    try expect(try bitlist.get(1) == false);
+    try expect(try bitlist.get(2) == true);
 
     var list = ArrayList(u8).init(std.testing.allocator);
     defer list.deinit();
@@ -1722,8 +1722,8 @@ test "Bitlist.init creates empty list (ArrayList migration fix)" {
     try bitlist.append(false);
 
     try expect(bitlist.len() == 2);
-    try expect(bitlist.get(0) == true);
-    try expect(bitlist.get(1) == false);
+    try expect(try bitlist.get(0) == true);
+    try expect(try bitlist.get(1) == false);
 }
 
 test "Bitlist init consistency with List" {
@@ -1783,10 +1783,10 @@ test "Simulate BoundedArray behavior vs ArrayList behavior" {
     try new_bitlist.append(false);
 
     try expect(new_bitlist.len() == 4);
-    try expect(new_bitlist.get(0) == true);
-    try expect(new_bitlist.get(1) == false);
-    try expect(new_bitlist.get(2) == true);
-    try expect(new_bitlist.get(3) == false);
+    try expect(try new_bitlist.get(0) == true);
+    try expect(try new_bitlist.get(1) == false);
+    try expect(try new_bitlist.get(2) == true);
+    try expect(try new_bitlist.get(3) == false);
 
     // Test serialization works correctly
     var serialized = ArrayList(u8).init(std.testing.allocator);
@@ -1811,7 +1811,7 @@ test "Bitlist memory safety after init fix" {
     // Add one element safely
     try bitlist.append(true);
     try expect(bitlist.len() == 1);
-    try expect(bitlist.get(0) == true);
+    try expect(try bitlist.get(0) == true);
 
     // Now this supposed to panic
     // bitlist.get(1);
@@ -1878,9 +1878,9 @@ test "SSZ external reference vectors" {
     try TestBitlist.sszDecode(&ssz_pattern, &decoded_pattern, std.testing.allocator);
 
     try expect(decoded_pattern.len() == 3);
-    try expect(decoded_pattern.get(0) == true);
-    try expect(decoded_pattern.get(1) == false);
-    try expect(decoded_pattern.get(2) == true);
+    try expect(try decoded_pattern.get(0) == true);
+    try expect(try decoded_pattern.get(1) == false);
+    try expect(try decoded_pattern.get(2) == true);
 
     // Reference test 3: Round-trip should produce same bytes as spec
     var reencoded = ArrayList(u8).init(std.testing.allocator);

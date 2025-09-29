@@ -176,8 +176,8 @@ test "List[Validator] serialization and hash tree root" {
 
     // Verify each validator was deserialized correctly
     for (0..validator_list.len()) |i| {
-        const orig = validator_list.get(i);
-        const deser = deserialized_list.get(i);
+        const orig = try validator_list.get(i);
+        const deser = try deserialized_list.get(i);
 
         try expect(std.mem.eql(u8, &orig.pubkey, &deser.pubkey));
         try expect(std.mem.eql(u8, &orig.withdrawal_credentials, &deser.withdrawal_credentials));
@@ -266,8 +266,8 @@ test "BeamBlockBody with validator array - full cycle" {
     try expect(beam_block_body.validators.len() == 2);
 
     for (0..beam_block_body.validators.len()) |i| {
-        const orig = beam_block_body.validators.get(i);
-        const deser = deserialized_body.validators.get(i);
+        const orig = try beam_block_body.validators.get(i);
+        const deser = try deserialized_body.validators.get(i);
 
         try expect(std.mem.eql(u8, &orig.pubkey, &deser.pubkey));
         try expect(std.mem.eql(u8, &orig.withdrawal_credentials, &deser.withdrawal_credentials));
@@ -481,8 +481,8 @@ test "BeamState with historical roots - comprehensive test" {
 
     // Compare each historical root
     for (0..beam_state.historical_roots.len()) |i| {
-        const original_root = beam_state.historical_roots.get(i);
-        const deserialized_root = deserialized_state.historical_roots.get(i);
+        const original_root = try beam_state.historical_roots.get(i);
+        const deserialized_root = try deserialized_state.historical_roots.get(i);
         try expect(std.mem.eql(u8, &original_root, &deserialized_root));
     }
 
@@ -612,8 +612,8 @@ test "BeamState with maximum historical roots" {
 
     // Compare each root
     for (0..MAX_HISTORICAL_ROOTS) |i| {
-        const original_root = beam_state.historical_roots.get(i);
-        const deserialized_root = deserialized_state.historical_roots.get(i);
+        const original_root = try beam_state.historical_roots.get(i);
+        const deserialized_root = try deserialized_state.historical_roots.get(i);
         try expect(std.mem.eql(u8, &original_root, &deserialized_root));
     }
 
@@ -687,8 +687,8 @@ test "BeamState historical roots access and comparison" {
 
     // Test individual root access and comparison
     for (0..test_patterns.len) |i| {
-        const original_root = beam_state.historical_roots.get(i);
-        const deserialized_root = deserialized_state.historical_roots.get(i);
+        const original_root = try beam_state.historical_roots.get(i);
+        const deserialized_root = try deserialized_state.historical_roots.get(i);
         const expected_pattern = test_patterns[i];
 
         // Verify root matches expected pattern

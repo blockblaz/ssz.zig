@@ -875,7 +875,7 @@ pub fn getDefault(comptime T: type) T {
         .bool => false,
         .int => 0,
         .float => 0.0,
-        .null => {},
+        .null => null,
         .void => {},
         .array => |array| blk: {
             var result: T = undefined;

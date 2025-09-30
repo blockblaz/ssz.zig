@@ -799,7 +799,7 @@ pub fn hashTreeRoot(comptime T: type, value: T, out: *[32]u8, allctr: Allocator)
         },
         .pointer => |ptr| {
             switch (ptr.size) {
-                .one => hashTreeRoot(ptr.child, value.*, out, allctr),
+                .one => try hashTreeRoot(ptr.child, value.*, out, allctr),
                 .slice => {
                     switch (@typeInfo(ptr.child)) {
                         .int => {

@@ -751,3 +751,42 @@ test "SimpleBeamState with empty historical roots" {
     // Verify hash tree roots are identical
     try expect(std.mem.eql(u8, &original_hash, &deserialized_hash));
 }
+
+test "hashTreeRoot for pointer types" {
+    var hash: [32]u8 = undefined;
+
+    // Test pointer size .one - SUPPORTED
+    {
+        var value: u32 = 8;
+        try hashTreeRoot(*u32, &value, &hash, std.testing.allocator);
+
+        var deserialized: u32 = undefined;
+        try deserialize(u32, &hash, &deserialized, std.testing.allocator);
+        try expect(deserialized == value);
+    }
+
+    // Test pointer to array (size .slice) - SUPPORTED
+    {
+        var values = [4]u8{ 0xAA, 0xBB, 0xCC, 0xDD };
+        const values_ptr: *[4]u8 = &values;
+        try hashTreeRoot(*[4]u8, values_ptr, &hash, std.testing.allocator);
+
+        var deserialized: [4]u8 = undefined;
+        try deserialize([4]u8, &hash, &deserialized, std.testing.allocator);
+        try expect(std.mem.eql(u8, &deserialized, values_ptr));
+    }
+
+    // Test pointer size .many - should return error
+    {
+        var values = [4]u8{ 0xAA, 0xBB, 0xCC, 0xDD };
+        const values_ptr: [*]u8 = &values;
+        try std.testing.expectError(error.UnSupportedPointerType, hashTreeRoot([*]u8, values_ptr, &hash, std.testing.allocator));
+    }
+
+    // Test pointer size .c - should return error
+    {
+        var values = [4]u8{ 0xAA, 0xBB, 0xCC, 0xDD };
+        const values_ptr: [*c]u8 = &values;
+        try std.testing.expectError(error.UnSupportedPointerType, hashTreeRoot([*c]u8, values_ptr, &hash, std.testing.allocator));
+    }
+}

@@ -863,6 +863,61 @@ pub fn hashTreeRoot(comptime T: type, value: T, out: *[32]u8, allctr: Allocator)
     }
 }
 
+/// Returns a default/empty value for any SSZ-supported type
+pub fn getDefault(comptime T: type) T {
+    // Check if type has its own getDefault method first
+    if (comptime std.meta.hasFn(T, "getDefault")) {
+        return T.getDefault();
+    }
+
+    const info = @typeInfo(T);
+    return switch (info) {
+        .bool => false,
+        .int => 0,
+        .float => 0.0,
+        .null => null,
+        .void => {},
+        .array => |array| blk: {
+            var result: T = undefined;
+            for (0..array.len) |i| {
+                result[i] = getDefault(array.child);
+            }
+            break :blk result;
+        },
+        .pointer => |ptr| switch (ptr.size) {
+            .slice => &[0]ptr.child{}, // Empty slice
+            .one => @compileError("Single pointers (*T) do not have a default SSZ value. Consider using an optional type (?*T)."),
+            else => @compileError("Unsupported pointer type for getDefault"),
+        },
+        .optional => null,
+        .@"struct" => |str| blk: {
+            var result: T = undefined;
+            inline for (str.fields) |field| {
+                @field(result, field.name) = getDefault(field.type);
+            }
+            break :blk result;
+        },
+        .@"union" => |u| blk: {
+            if (u.tag_type == null) {
+                @compileError("Cannot create default for untagged union");
+            }
+            // Return the first variant with its default value
+            const first_field = u.fields[0];
+            break :blk @unionInit(T, first_field.name, getDefault(first_field.type));
+        },
+        .@"enum" => |e| blk: {
+            // SSZ has no dedicated enum type. For Zig enums in our library,
+            // we use the first declared field as the default.
+            if (e.fields.len == 0) {
+                @compileError("Cannot get default for enum with no variants: " ++ @typeName(T));
+            }
+            const first_field_name = e.fields[0].name;
+            break :blk @field(T, first_field_name);
+        },
+        else => @compileError("getDefault not supported for type " ++ @typeName(T)),
+    };
+}
+
 // used at comptime to generate a bitvector from a byte vector
 fn bytesToBits(comptime N: usize, src: [N]u8) [N * 8]bool {
     var bitvector: [N * 8]bool = undefined;

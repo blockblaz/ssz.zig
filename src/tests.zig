@@ -9,6 +9,7 @@ const isFixedSizeObject = libssz.isFixedSizeObject;
 const std = @import("std");
 const ArrayList = std.ArrayList;
 const expect = std.testing.expect;
+const expectError = std.testing.expectError;
 const sha256 = std.crypto.hash.sha2.Sha256;
 const hashes_of_zero = libssz.zeros.hashes_of_zero;
 
@@ -55,6 +56,7 @@ test "serializes a int32" {
 test "non-byte aligned int serialization fails" {
     const data: u10 = 0x03ff;
     var list = ArrayList(u8).init(std.testing.allocator);
+    defer list.deinit();
     try std.testing.expectError(error.InvalidSerializedIntLengthType, serialize(u10, data, &list));
 }
 
@@ -667,35 +669,39 @@ test "calculate the root hash of an union" {
 test "(de)serialize List[N] of fixed-length objects" {
     const MAX_VALIDATORS_PER_COMMITTEE: usize = 2048;
     const ListValidatorIndex = utils.List(u64, MAX_VALIDATORS_PER_COMMITTEE);
-    var attesting_indices = try ListValidatorIndex.init(0);
+    var attesting_indices = try ListValidatorIndex.init(std.testing.allocator);
+    defer attesting_indices.deinit();
     for (0..10) |i| {
         try attesting_indices.append(i * 100);
     }
     var list = ArrayList(u8).init(std.testing.allocator);
     defer list.deinit();
     try serialize(ListValidatorIndex, attesting_indices, &list);
-    var attesting_indices_deser = try ListValidatorIndex.init(0);
-    try deserialize(ListValidatorIndex, list.items, &attesting_indices_deser, null);
+    var attesting_indices_deser = try ListValidatorIndex.init(std.testing.allocator);
+    defer attesting_indices_deser.deinit();
+    try deserialize(ListValidatorIndex, list.items, &attesting_indices_deser, std.testing.allocator);
     try expect(attesting_indices.eql(&attesting_indices_deser));
 }
 
 test "(de)serialize List[N] of variable-length objects" {
     const ListOfStrings = utils.List([]const u8, 16);
-    var string_list = try ListOfStrings.init(0);
+    var string_list = try ListOfStrings.init(std.testing.allocator);
+    defer string_list.deinit();
     for (0..10) |i| {
         try string_list.append(try std.fmt.allocPrint(std.testing.allocator, "count={}", .{i}));
     }
     defer for (0..string_list.len()) |i| {
-        std.testing.allocator.free(string_list.get(i));
+        std.testing.allocator.free(string_list.get(i) catch unreachable);
     };
     var list = ArrayList(u8).init(std.testing.allocator);
     defer list.deinit();
     try serialize(ListOfStrings, string_list, &list);
-    var string_list_deser = try ListOfStrings.init(0);
-    try deserialize(ListOfStrings, list.items, &string_list_deser, null);
+    var string_list_deser = try ListOfStrings.init(std.testing.allocator);
+    defer string_list_deser.deinit();
+    try deserialize(ListOfStrings, list.items, &string_list_deser, std.testing.allocator);
     try expect(string_list.len() == string_list_deser.len());
     for (0..string_list.len()) |i| {
-        try expect(std.mem.eql(u8, string_list.get(i), string_list_deser.get(i)));
+        try expect(std.mem.eql(u8, try string_list.get(i), try string_list_deser.get(i)));
     }
 }
 
@@ -704,71 +710,81 @@ test "List[N].fromSlice of structs" {
     var start: usize = 0;
     var end: usize = pastries.len;
     _ = .{ &start, &end };
-    const pastry_list = try PastryList.fromSlice(pastries[start..end]);
+    var pastry_list = try PastryList.fromSlice(std.testing.allocator, pastries[start..end]);
+    defer pastry_list.deinit();
     for (pastries, 0..) |pastry, i| {
-        try expect(std.mem.eql(u8, pastry_list.get(i).name, pastry.name));
-        try expect(pastry_list.get(i).weight == pastry.weight);
+        try expect(std.mem.eql(u8, (try pastry_list.get(i)).name, pastry.name));
+        try expect((try pastry_list.get(i)).weight == pastry.weight);
     }
 }
 
 test "(de)serialization of Bitlist[N]" {
-    var bitlist = try utils.Bitlist(10).init(0);
+    var bitlist = try utils.Bitlist(10).init(std.testing.allocator);
+    defer bitlist.deinit();
     try bitlist.append(true);
     try bitlist.append(false);
     try bitlist.append(true);
-    try expect(bitlist.get(1) == false);
-    try expect(bitlist.get(2) == true);
+    try expect(try bitlist.get(1) == false);
+    try expect(try bitlist.get(2) == true);
 
     var list = ArrayList(u8).init(std.testing.allocator);
     defer list.deinit();
     try serialize(@TypeOf(bitlist), bitlist, &list);
     var bitlist_deser: @TypeOf(bitlist) = undefined;
-    try deserialize(@TypeOf(bitlist), list.items, &bitlist_deser, null);
+    try deserialize(@TypeOf(bitlist), list.items, &bitlist_deser, std.testing.allocator);
+    defer bitlist_deser.deinit();
 }
 
 test "(de)serialization of Bitlist[N] when N % 8 != 0" {
-    var bitlist = try utils.Bitlist(3).init(0);
+    var bitlist = try utils.Bitlist(3).init(std.testing.allocator);
+    defer bitlist.deinit();
     try bitlist.append(true);
     try bitlist.append(false);
     try bitlist.append(true);
-    try expect(bitlist.get(1) == false);
-    try expect(bitlist.get(2) == true);
+    try expect(try bitlist.get(1) == false);
+    try expect(try bitlist.get(2) == true);
 
     var list = ArrayList(u8).init(std.testing.allocator);
     defer list.deinit();
     try serialize(@TypeOf(bitlist), bitlist, &list);
     var bitlist_deser: @TypeOf(bitlist) = undefined;
-    try deserialize(@TypeOf(bitlist), list.items, &bitlist_deser, null);
+    try deserialize(@TypeOf(bitlist), list.items, &bitlist_deser, std.testing.allocator);
+    defer bitlist_deser.deinit();
     try expect(bitlist.len() == bitlist_deser.len());
     try expect(bitlist.eql(&bitlist_deser));
 }
 
 test "(de)serialization of empty Bitlist[N]" {
-    const bitlist = try utils.Bitlist(8).init(0);
+    var bitlist = try utils.Bitlist(8).init(std.testing.allocator);
+    defer bitlist.deinit();
     var list = ArrayList(u8).init(std.testing.allocator);
     defer list.deinit();
     try serialize(@TypeOf(bitlist), bitlist, &list);
     try expect(std.mem.eql(u8, list.items, &[_]u8{0x01}));
     var bitlist_deser: @TypeOf(bitlist) = undefined;
-    try deserialize(@TypeOf(bitlist), list.items, &bitlist_deser, null);
+    try deserialize(@TypeOf(bitlist), list.items, &bitlist_deser, std.testing.allocator);
+    defer bitlist_deser.deinit();
     try expect(bitlist.len() == bitlist_deser.len());
     try expect(bitlist.eql(&bitlist_deser));
 }
 
 test "(de)serialization of Bitlist[0]" {
-    const bitlist = try utils.Bitlist(0).init(0);
+    var bitlist = try utils.Bitlist(0).init(std.testing.allocator);
+    defer bitlist.deinit();
     var list = ArrayList(u8).init(std.testing.allocator);
     defer list.deinit();
     try serialize(@TypeOf(bitlist), bitlist, &list);
     try expect(std.mem.eql(u8, list.items, &[_]u8{0x01}));
     var bitlist_deser: @TypeOf(bitlist) = undefined;
-    try deserialize(@TypeOf(bitlist), list.items, &bitlist_deser, null);
+    try deserialize(@TypeOf(bitlist), list.items, &bitlist_deser, std.testing.allocator);
+    defer bitlist_deser.deinit();
     try expect(bitlist.len() == bitlist_deser.len());
     try expect(bitlist.eql(&bitlist_deser));
 }
 
 test "(de)serialization of full Bitlist[N] when N % 8 == 0" {
-    var bitlist = try utils.Bitlist(8).init(0);
+    var bitlist = try utils.Bitlist(8).init(std.testing.allocator);
+    defer bitlist.deinit();
     try bitlist.append(true);
     try bitlist.append(false);
     try bitlist.append(true);
@@ -777,8 +793,8 @@ test "(de)serialization of full Bitlist[N] when N % 8 == 0" {
     try bitlist.append(false);
     try bitlist.append(false);
     try bitlist.append(false);
-    try expect(bitlist.get(1) == false);
-    try expect(bitlist.get(2) == true);
+    try expect(try bitlist.get(1) == false);
+    try expect(try bitlist.get(2) == true);
 
     var list = ArrayList(u8).init(std.testing.allocator);
     defer list.deinit();
@@ -787,7 +803,8 @@ test "(de)serialization of full Bitlist[N] when N % 8 == 0" {
     // should serialize to 0501
     try expect(std.mem.eql(u8, list.items, &[_]u8{ 0x05, 0x01 }));
     var bitlist_deser: @TypeOf(bitlist) = undefined;
-    try deserialize(@TypeOf(bitlist), list.items, &bitlist_deser, null);
+    try deserialize(@TypeOf(bitlist), list.items, &bitlist_deser, std.testing.allocator);
+    defer bitlist_deser.deinit();
     try expect(bitlist.len() == bitlist_deser.len());
     try expect(bitlist.eql(&bitlist_deser));
 }
@@ -940,8 +957,10 @@ test "slice hashtree root simple type" {
 test "List tree root calculation" {
     const ListU64 = utils.List(u64, 1024);
 
-    const empty_list = try ListU64.init(0);
-    var list_with_items = try ListU64.init(0);
+    var empty_list = try ListU64.init(std.testing.allocator);
+    defer empty_list.deinit();
+    var list_with_items = try ListU64.init(std.testing.allocator);
+    defer list_with_items.deinit();
     try list_with_items.append(42);
     try list_with_items.append(123);
     try list_with_items.append(456);
@@ -956,7 +975,8 @@ test "List tree root calculation" {
 
     try expect(!std.mem.eql(u8, &empty_hash, &filled_hash));
 
-    var same_content_list = try ListU64.init(0);
+    var same_content_list = try ListU64.init(std.testing.allocator);
+    defer same_content_list.deinit();
     try same_content_list.append(42);
     try same_content_list.append(123);
     try same_content_list.append(456);
@@ -970,8 +990,10 @@ test "List tree root calculation" {
 test "Bitlist tree root calculation" {
     const TestBitlist = utils.Bitlist(256);
 
-    const empty_bitlist = try TestBitlist.init(0);
-    var filled_bitlist = try TestBitlist.init(0);
+    var empty_bitlist = try TestBitlist.init(std.testing.allocator);
+    defer empty_bitlist.deinit();
+    var filled_bitlist = try TestBitlist.init(std.testing.allocator);
+    defer filled_bitlist.deinit();
     try filled_bitlist.append(true);
     try filled_bitlist.append(false);
     try filled_bitlist.append(true);
@@ -985,7 +1007,8 @@ test "Bitlist tree root calculation" {
 
     try expect(!std.mem.eql(u8, &empty_hash, &filled_hash));
 
-    var same_content_bitlist = try TestBitlist.init(0);
+    var same_content_bitlist = try TestBitlist.init(std.testing.allocator);
+    defer same_content_bitlist.deinit();
     try same_content_bitlist.append(true);
     try same_content_bitlist.append(false);
     try same_content_bitlist.append(true);
@@ -1000,14 +1023,16 @@ test "Bitlist tree root calculation" {
 test "List of composite types tree root" {
     const ListOfPastry = utils.List(Pastry, 100);
 
-    var pastry_list = try ListOfPastry.init(0);
+    var pastry_list = try ListOfPastry.init(std.testing.allocator);
+    defer pastry_list.deinit();
     try pastry_list.append(Pastry{ .name = "croissant", .weight = 20 });
     try pastry_list.append(Pastry{ .name = "muffin", .weight = 30 });
 
     var hash1: [32]u8 = undefined;
     try hashTreeRoot(ListOfPastry, pastry_list, &hash1, std.testing.allocator);
 
-    var pastry_list2 = try ListOfPastry.init(0);
+    var pastry_list2 = try ListOfPastry.init(std.testing.allocator);
+    defer pastry_list2.deinit();
     try pastry_list2.append(Pastry{ .name = "croissant", .weight = 20 });
     try pastry_list2.append(Pastry{ .name = "muffin", .weight = 30 });
 
@@ -1026,7 +1051,8 @@ test "List of composite types tree root" {
 test "serializedSize correctly calculates List/Bitlist sizes" {
     // Test List size calculation
     const ListType = utils.List(u64, 100);
-    var list = try ListType.init(0);
+    var list = try ListType.init(std.testing.allocator);
+    defer list.deinit();
     try list.append(123);
     try list.append(456);
 
@@ -1040,7 +1066,8 @@ test "serializedSize correctly calculates List/Bitlist sizes" {
 
     // Test Bitlist size calculation
     const BitlistType = utils.Bitlist(256);
-    var bitlist = try BitlistType.init(0);
+    var bitlist = try BitlistType.init(std.testing.allocator);
+    defer bitlist.deinit();
     try bitlist.append(true);
     try bitlist.append(false);
     try bitlist.append(true);
@@ -1249,7 +1276,8 @@ test "serialize max/min integer values" {
 
 test "Empty List hash tree root" {
     const ListU32 = utils.List(u32, 100);
-    const empty_list = try ListU32.init(0);
+    var empty_list = try ListU32.init(std.testing.allocator);
+    defer empty_list.deinit();
 
     var hash: [32]u8 = undefined;
     try hashTreeRoot(ListU32, empty_list, &hash, std.testing.allocator);
@@ -1266,7 +1294,8 @@ test "Empty List hash tree root" {
 
 test "Empty BitList(<=256) hash tree root" {
     const BitListLen100 = utils.Bitlist(100);
-    const empty_list = try BitListLen100.init(0);
+    var empty_list = try BitListLen100.init(std.testing.allocator);
+    defer empty_list.deinit();
 
     var hash: [32]u8 = undefined;
     try hashTreeRoot(BitListLen100, empty_list, &hash, std.testing.allocator);
@@ -1282,7 +1311,8 @@ test "Empty BitList(<=256) hash tree root" {
 
 test "Empty BitList (>256) hash tree root" {
     const BitListLen100 = utils.Bitlist(2570);
-    const empty_list = try BitListLen100.init(0);
+    var empty_list = try BitListLen100.init(std.testing.allocator);
+    defer empty_list.deinit();
 
     var hash: [32]u8 = undefined;
     try hashTreeRoot(BitListLen100, empty_list, &hash, std.testing.allocator);
@@ -1298,7 +1328,8 @@ test "Empty BitList (>256) hash tree root" {
 
 test "List at maximum capacity" {
     const ListU8 = utils.List(u8, 4);
-    var full_list = try ListU8.init(0);
+    var full_list = try ListU8.init(std.testing.allocator);
+    defer full_list.deinit();
 
     // Fill to capacity
     try full_list.append(1);
@@ -1306,7 +1337,7 @@ test "List at maximum capacity" {
     try full_list.append(3);
     try full_list.append(4);
 
-    // Should fail to add more
+    // Test bounds checking: should fail to add beyond capacity
     try std.testing.expectError(error.Overflow, full_list.append(5));
 
     // Test hash tree root at capacity
@@ -1379,7 +1410,8 @@ test "Bitlist edge cases" {
     const TestBitlist = utils.Bitlist(100);
 
     // All false
-    var all_false = try TestBitlist.init(0);
+    var all_false = try TestBitlist.init(std.testing.allocator);
+    defer all_false.deinit();
     for (0..50) |_| {
         try all_false.append(false);
     }
@@ -1396,7 +1428,8 @@ test "Bitlist edge cases" {
     try expect(std.mem.eql(u8, &hash1, &expected_false));
 
     // All true
-    var all_true = try TestBitlist.init(0);
+    var all_true = try TestBitlist.init(std.testing.allocator);
+    defer all_true.deinit();
     for (0..50) |_| {
         try all_true.append(true);
     }
@@ -1418,7 +1451,8 @@ test "Bitlist trailing zeros optimization" {
     const TestBitlist = utils.Bitlist(256);
 
     // Test case 1: 8 false bits - should result in one 0x00 byte after pack_bits
-    var eight_false = try TestBitlist.init(0);
+    var eight_false = try TestBitlist.init(std.testing.allocator);
+    defer eight_false.deinit();
     for (0..8) |_| {
         try eight_false.append(false);
     }
@@ -1437,7 +1471,8 @@ test "Bitlist trailing zeros optimization" {
     try expect(std.mem.eql(u8, &hash1, &expected_eight_false));
 
     // Test case 2: Pattern with trailing zeros but non-zero first byte
-    var pattern = try TestBitlist.init(0);
+    var pattern = try TestBitlist.init(std.testing.allocator);
+    defer pattern.deinit();
     try pattern.append(true);
     try pattern.append(false);
     try pattern.append(true);
@@ -1477,7 +1512,8 @@ test "uint256 hash tree root" {
 
 test "Single element List" {
     const ListU64 = utils.List(u64, 10);
-    var single = try ListU64.init(0);
+    var single = try ListU64.init(std.testing.allocator);
+    defer single.deinit();
     try single.append(42);
 
     var hash: [32]u8 = undefined;
@@ -1628,7 +1664,8 @@ test "decodeDynamicLength - comprehensive validation" {
 }
 
 test "List validation - size limits enforced" {
-    var list = try utils.List(u32, 3).init(0);
+    var list = try utils.List(u32, 3).init(std.testing.allocator);
+    defer list.deinit();
 
     // Test oversized fixed-size list
     {
@@ -1641,34 +1678,276 @@ test "List validation - size limits enforced" {
             0x05, 0x00, 0x00, 0x00, // u32 = 5
         };
 
-        try std.testing.expectError(error.ListTooBig, deserialize(utils.List(u32, 3), &oversized_data, &list, null));
+        try std.testing.expectError(error.ListTooBig, deserialize(utils.List(u32, 3), &oversized_data, &list, std.testing.allocator));
     }
 }
 
 test "Bitlist validation - comprehensive style" {
-    var bitlist = try utils.Bitlist(8).init(0);
+    var bitlist = try utils.Bitlist(8).init(std.testing.allocator);
+    defer bitlist.deinit();
 
     // Test bitlist with missing delimiter
     {
         const no_delimiter = [_]u8{0x00};
-        try std.testing.expectError(error.BitlistTrailingByteZero, deserialize(utils.Bitlist(8), &no_delimiter, &bitlist, null));
+        try std.testing.expectError(error.BitlistTrailingByteZero, deserialize(utils.Bitlist(8), &no_delimiter, &bitlist, std.testing.allocator));
     }
 
     // Test bitlist exceeding size limit
     {
         const too_large = [_]u8{ 0xFF, 0xFF }; // 16 bits, but limit is 8
-        try std.testing.expectError(error.BitlistTooManyBits, deserialize(utils.Bitlist(8), &too_large, &bitlist, null));
+        try std.testing.expectError(error.BitlistTooManyBits, deserialize(utils.Bitlist(8), &too_large, &bitlist, std.testing.allocator));
     }
 
     // Test valid bitlist
     {
         const valid = [_]u8{0x07}; // 2 data bits: 11, delimiter at position 2
-        try deserialize(utils.Bitlist(8), &valid, &bitlist, null);
+        try deserialize(utils.Bitlist(8), &valid, &bitlist, std.testing.allocator);
         try expect(bitlist.length == 2); // Should have 2 actual data bits
     }
 }
 
-// Import beacon tests
+test "Bitlist.init creates empty list (ArrayList migration fix)" {
+    // ArrayList init should create empty list, populate with append()
+
+    const TestBitlist = utils.Bitlist(10);
+    var bitlist = try TestBitlist.init(std.testing.allocator);
+    defer bitlist.deinit();
+
+    // After init, bitlist should be empty (length=0), not pre-sized
+    try expect(bitlist.len() == 0);
+    try expect(bitlist.inner.items.len == 0);
+
+    // Populate with append
+    try bitlist.append(true);
+    try bitlist.append(false);
+
+    try expect(bitlist.len() == 2);
+    try expect(try bitlist.get(0) == true);
+    try expect(try bitlist.get(1) == false);
+}
+
+test "Bitlist init consistency with List" {
+    // Both List and Bitlist should have consistent init behavior
+    const TestList = utils.List(u32, 10);
+    const TestBitlist = utils.Bitlist(10);
+
+    var list = try TestList.init(std.testing.allocator);
+    defer list.deinit();
+    var bitlist = try TestBitlist.init(std.testing.allocator);
+    defer bitlist.deinit();
+
+    // Both should start empty after init
+    try expect(list.len() == 0);
+    try expect(bitlist.len() == 0);
+
+    // Both should have reserved capacity but no actual elements
+    try expect(list.inner.items.len == 0);
+    try expect(bitlist.inner.items.len == 0);
+}
+
+test "Bitlist bounds checking during ArrayList migration" {
+    // Test that proper bounds checking prevents the inconsistent state
+    const TestBitlist = utils.Bitlist(3);
+    var bitlist = try TestBitlist.init(std.testing.allocator); // capacity > N
+    defer bitlist.deinit();
+
+    // Should start empty
+    try expect(bitlist.len() == 0);
+
+    // Fill to capacity
+    try bitlist.append(true);
+    try bitlist.append(false);
+    try bitlist.append(true);
+
+    // Should hit the limit now
+    try expect(bitlist.len() == 3);
+
+    // Test bounds checking: should fail to add beyond capacity
+    try std.testing.expectError(error.Overflow, bitlist.append(true));
+}
+
+test "Simulate BoundedArray behavior vs ArrayList behavior" {
+    // This test demonstrates the difference between old BoundedArray and new ArrayList
+    const TestBitlist = utils.Bitlist(8);
+
+    // NEW BEHAVIOR (ArrayList-based): Start empty, populate with append
+    var new_bitlist = try TestBitlist.init(std.testing.allocator);
+    defer new_bitlist.deinit();
+
+    try expect(new_bitlist.len() == 0); // Starts empty
+
+    // Populate step by step
+    try new_bitlist.append(true);
+    try new_bitlist.append(false);
+    try new_bitlist.append(true);
+    try new_bitlist.append(false);
+
+    try expect(new_bitlist.len() == 4);
+    try expect(try new_bitlist.get(0) == true);
+    try expect(try new_bitlist.get(1) == false);
+    try expect(try new_bitlist.get(2) == true);
+    try expect(try new_bitlist.get(3) == false);
+
+    // Test serialization works correctly
+    var serialized = ArrayList(u8).init(std.testing.allocator);
+    defer serialized.deinit();
+    try new_bitlist.sszEncode(&serialized);
+
+    // This test validates ArrayList migration works
+    // We know serialization produces output - exact bytes tested elsewhere
+    try expect(serialized.items.len >= 1); // At least produces some output
+    try expect(new_bitlist.len() == 4); // Proper length tracking
+}
+
+test "Bitlist memory safety after init fix" {
+    // Ensures no out-of-bounds access after fixing the init issue
+    const TestBitlist = utils.Bitlist(16);
+    var bitlist = try TestBitlist.init(std.testing.allocator);
+    defer bitlist.deinit();
+
+    // These operations should not crash
+    try expect(bitlist.len() == 0);
+
+    // Add one element safely
+    try bitlist.append(true);
+    try expect(bitlist.len() == 1);
+    try expect(try bitlist.get(0) == true);
+
+    // Now this supposed to panic
+    // bitlist.get(1);
+}
+
+test "SSZ compliance: Bitlist starts empty per spec" {
+    // Our init should create empty bitlist, then populate with append
+    const TestBitlist = utils.Bitlist(100);
+
+    // Test 1: Empty bitlist serialization
+    var empty_bitlist = try TestBitlist.init(std.testing.allocator);
+    defer empty_bitlist.deinit();
+
+    var empty_serialized = ArrayList(u8).init(std.testing.allocator);
+    defer empty_serialized.deinit();
+    try empty_bitlist.sszEncode(&empty_serialized);
+
+    // Empty bitlist should serialize to single byte with delimiter bit
+    try expect(empty_serialized.items.len == 1);
+    try expect(empty_serialized.items[0] == 0x01); // Just the delimiter bit
+
+    // Test 2: Round-trip empty bitlist
+    var decoded_empty = try TestBitlist.init(std.testing.allocator);
+    defer decoded_empty.deinit();
+    try TestBitlist.sszDecode(empty_serialized.items, &decoded_empty, std.testing.allocator);
+    try expect(decoded_empty.len() == 0);
+
+    // Test 3: Populated bitlist starts from empty state
+    var populated = try TestBitlist.init(std.testing.allocator);
+    defer populated.deinit();
+
+    // Add bits one by one (proper SSZ usage pattern)
+    try populated.append(true);
+    try populated.append(false);
+    try populated.append(true);
+
+    var populated_serialized = ArrayList(u8).init(std.testing.allocator);
+    defer populated_serialized.deinit();
+    try populated.sszEncode(&populated_serialized);
+
+    // SSZ spec: [true, false, true] + delimiter at index 3
+    // Bits: 0=1, 1=0, 2=1, delimiter=1 at bit 3
+    // Binary: 0b00001101 = 0x0D (our implementation is correct!)
+    try expect(populated_serialized.items.len == 1);
+    try expect(populated_serialized.items[0] == 0x0D);
+}
+
+test "SSZ external reference vectors" {
+    const TestBitlist = utils.Bitlist(16);
+
+    // Reference test 1: Decode known valid SSZ bitlist from spec
+    const ssz_empty_bitlist = [_]u8{0x01}; // Empty bitlist per SSZ spec
+    var decoded_empty = try TestBitlist.init(std.testing.allocator);
+    defer decoded_empty.deinit();
+
+    try TestBitlist.sszDecode(&ssz_empty_bitlist, &decoded_empty, std.testing.allocator);
+    try expect(decoded_empty.len() == 0);
+
+    // Reference test 2: Decode [true, false, true] from SSZ spec
+    const ssz_pattern = [_]u8{0x0D}; // Per SSZ spec: 0b00001101
+    var decoded_pattern = try TestBitlist.init(std.testing.allocator);
+    defer decoded_pattern.deinit();
+
+    try TestBitlist.sszDecode(&ssz_pattern, &decoded_pattern, std.testing.allocator);
+
+    try expect(decoded_pattern.len() == 3);
+    try expect(try decoded_pattern.get(0) == true);
+    try expect(try decoded_pattern.get(1) == false);
+    try expect(try decoded_pattern.get(2) == true);
+
+    // Reference test 3: Round-trip should produce same bytes as spec
+    var reencoded = ArrayList(u8).init(std.testing.allocator);
+    defer reencoded.deinit();
+    try decoded_pattern.sszEncode(&reencoded);
+
+    try expect(reencoded.items.len == 1);
+    try expect(reencoded.items[0] == 0x0D);
+}
+
+test "List fromSlice overflow rejection" {
+    const TestList = utils.List(u32, 2);
+    const oversized_slice = [_]u32{ 1, 2, 3, 4 };
+    const result = TestList.fromSlice(std.testing.allocator, &oversized_slice);
+    try expectError(error.Overflow, result);
+}
+
+test "List fromSlice at exact capacity" {
+    const TestList = utils.List(u32, 3);
+    const exact_slice = [_]u32{ 10, 20, 30 };
+    var list = try TestList.fromSlice(std.testing.allocator, &exact_slice);
+    defer list.deinit();
+    try expect(list.len() == 3);
+}
+
+test "Zero capacity List" {
+    const TestList = utils.List(u32, 0);
+    var list = try TestList.init(std.testing.allocator);
+    defer list.deinit();
+    try expect(list.len() == 0);
+    try expectError(error.Overflow, list.append(1));
+}
+
+test "Zero capacity Bitlist" {
+    const TestBitlist = utils.Bitlist(0);
+    var bitlist = try TestBitlist.init(std.testing.allocator);
+    defer bitlist.deinit();
+    try expect(bitlist.len() == 0);
+    try expectError(error.Overflow, bitlist.append(true));
+}
+
+test "Large capacity List overflow" {
+    const TestList = utils.List(u8, 1000);
+    var list = try TestList.init(std.testing.allocator);
+    defer list.deinit();
+
+    var i: usize = 0;
+    while (i < 1000) : (i += 1) {
+        try list.append(@truncate(i));
+    }
+    try expect(list.len() == 1000);
+    try expectError(error.Overflow, list.append(255));
+}
+
+test "Large capacity Bitlist overflow" {
+    const TestBitlist = utils.Bitlist(1000);
+    var bitlist = try TestBitlist.init(std.testing.allocator);
+    defer bitlist.deinit();
+
+    var i: usize = 0;
+    while (i < 1000) : (i += 1) {
+        try bitlist.append(i % 2 == 0);
+    }
+    try expect(bitlist.len() == 1000);
+    try expectError(error.Overflow, bitlist.append(true));
+}
+
 test {
     _ = @import("beacon_tests.zig");
 }

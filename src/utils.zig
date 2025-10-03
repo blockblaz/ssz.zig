@@ -45,6 +45,7 @@ pub fn List(comptime T: type, comptime N: usize) type {
             out.* = try init(alloc);
 
             // FastSSZ-style capacity optimization: pre-allocate based on input size
+            // TODO: replace this with the definite value, taken from the list
             if (serialized.len > 0) {
                 const estimated_capacity = if (try lib.isFixedSizeObject(Self.Item))
                     serialized.len / (try lib.serializedFixedSize(Self.Item))

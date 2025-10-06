@@ -235,11 +235,6 @@ pub fn Bitlist(comptime N: usize) type {
             // Comprehensive validation (handles empty, trailing zero, size limits)
             try Self.validateBitlist(serialized);
 
-            // If validation passed but buffer is empty, we're done
-            if (serialized.len == 0) {
-                return;
-            }
-
             // FastSSZ-style capacity optimization: pre-allocate based on input size
             const byte_capacity = serialized.len;
             if (byte_capacity > 0) {
@@ -351,7 +346,9 @@ pub fn Bitlist(comptime N: usize) type {
         /// Validates that the bitlist is correctly formed
         pub fn validateBitlist(buf: []const u8) !void {
             const byte_len = buf.len;
-            if (byte_len == 0) return;
+
+            // Empty buffer is invalid, at least sentinel bit should exist
+            if (byte_len == 0) return error.InvalidBitlistEncoding;
 
             // Maximum possible bytes in a bitlist with provided bitlimit.
             const max_bytes = ((N + 7 + 1) >> 3);

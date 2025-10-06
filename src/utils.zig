@@ -246,22 +246,29 @@ pub fn Bitlist(comptime N: usize) type {
                 try out.inner.ensureTotalCapacity(byte_capacity);
             }
 
-            // Parse the bit structure (validation already confirmed it's valid)
-            const byte_len = serialized.len - 1;
-            var last_byte = serialized[byte_len];
-            var bit_len: usize = 8;
-            while (last_byte & @shlExact(@as(usize, 1), @truncate(bit_len)) == 0) : (bit_len -= 1) {}
+            // Find sentinel bit position using @clz (count leading zeros)
+            const last_byte = serialized[serialized.len - 1];
+            const msb_pos = @as(usize, 8) - @clz(last_byte);
+            const bit_length = 8 * (serialized.len - 1) + (msb_pos - 1);
 
-            // insert all full bytes
-            try out.*.inner.insertSlice(0, serialized[0..byte_len]);
-            out.*.length = 8 * byte_len;
+            // Calculate how many full bytes we need (excluding sentinel)
+            const full_bytes = bit_length / 8;
+            const remaining_bits = bit_length % 8;
 
-            // insert last bits
-            last_byte = serialized[byte_len];
-            for (0..bit_len) |_| {
-                try out.*.append(last_byte & 1 == 1);
-                last_byte >>= 1;
+            // Copy all full bytes
+            if (full_bytes > 0) {
+                try out.*.inner.appendSlice(serialized[0..full_bytes]);
             }
+
+            // Handle remaining bits in the last byte (if any)
+            if (remaining_bits > 0) {
+                // The last byte contains both data bits and the sentinel bit
+                // We need to mask out the sentinel bit and any bits after it
+                const mask = (@as(u8, 1) << @truncate(remaining_bits)) - 1;
+                try out.*.inner.append(serialized[full_bytes] & mask);
+            }
+
+            out.*.length = bit_length;
         }
 
         pub fn isFixedSizeObject() bool {

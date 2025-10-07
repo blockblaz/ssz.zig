@@ -1984,7 +1984,7 @@ test "(de)serialize []bool slice" {
         var list2 = ArrayList(u8).init(allocator);
         defer list2.deinit();
         try serialize([]const bool, slice2, &list2);
-        try expect(std.mem.eql(u8, list2.items, &[_]u8{0x55, 0x01}));
+        try expect(std.mem.eql(u8, list2.items, &[_]u8{ 0x55, 0x01 }));
         var deserialized2: []bool = undefined;
         try deserialize([]bool, list2.items, &deserialized2, allocator);
         defer allocator.free(deserialized2);
@@ -1997,7 +1997,7 @@ test "(de)serialize []bool slice" {
         var list3 = ArrayList(u8).init(allocator);
         defer list3.deinit();
         try serialize([]const bool, slice3, &list3);
-        try expect(std.mem.eql(u8, list3.items, &[_]u8{0x55, 0x03}));
+        try expect(std.mem.eql(u8, list3.items, &[_]u8{ 0x55, 0x03 }));
         var deserialized3: []bool = undefined;
         try deserialize([]bool, list3.items, &deserialized3, allocator);
         defer allocator.free(deserialized3);
@@ -2049,7 +2049,7 @@ test "[]bool and Bitlist serialization equivalence" {
         try serialize(Bitlist8, bitlist8, &list_for_bitlist_8);
 
         try expect(std.mem.eql(u8, list_for_slice_8.items, list_for_bitlist_8.items));
-        try expect(std.mem.eql(u8, list_for_slice_8.items, &[_]u8{0x55, 0x01}));
+        try expect(std.mem.eql(u8, list_for_slice_8.items, &[_]u8{ 0x55, 0x01 }));
     }
 }
 

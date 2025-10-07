@@ -1948,6 +1948,209 @@ test "Large capacity Bitlist overflow" {
     try expectError(error.Overflow, bitlist.append(true));
 }
 
+test "(de)serialize []bool slice" {
+    const allocator = std.testing.allocator;
+
+    // 1. Test empty slice
+    {
+        const empty_slice = &[_]bool{};
+        var list_empty = ArrayList(u8).init(allocator);
+        defer list_empty.deinit();
+        try serialize([]const bool, empty_slice, &list_empty);
+        try expect(std.mem.eql(u8, list_empty.items, &[_]u8{0x01}));
+        var deserialized_empty: []bool = undefined;
+        try deserialize([]bool, list_empty.items, &deserialized_empty, allocator);
+        try expect(std.mem.eql(bool, deserialized_empty, empty_slice[0..]));
+        defer allocator.free(deserialized_empty);
+        try expect(deserialized_empty.len == 0);
+    }
+
+    // 2. Test non-byte-aligned
+    {
+        const slice1 = &[_]bool{ true, false, true };
+        var list1 = ArrayList(u8).init(allocator);
+        defer list1.deinit();
+        try serialize([]const bool, slice1, &list1);
+        try expect(std.mem.eql(u8, list1.items, &[_]u8{0b00001101}));
+        var deserialized1: []bool = undefined;
+        try deserialize([]bool, list1.items, &deserialized1, allocator);
+        defer allocator.free(deserialized1);
+        try expect(std.mem.eql(bool, slice1, deserialized1));
+    }
+
+    // 3. Test byte-aligned
+    {
+        const slice2 = &[_]bool{ true, false, true, false, true, false, true, false };
+        var list2 = ArrayList(u8).init(allocator);
+        defer list2.deinit();
+        try serialize([]const bool, slice2, &list2);
+        try expect(std.mem.eql(u8, list2.items, &[_]u8{0x55, 0x01}));
+        var deserialized2: []bool = undefined;
+        try deserialize([]bool, list2.items, &deserialized2, allocator);
+        defer allocator.free(deserialized2);
+        try expect(std.mem.eql(bool, slice2, deserialized2));
+    }
+
+    // 4. Test multiple bytes
+    {
+        const slice3 = &[_]bool{ true, false, true, false, true, false, true, false, true };
+        var list3 = ArrayList(u8).init(allocator);
+        defer list3.deinit();
+        try serialize([]const bool, slice3, &list3);
+        try expect(std.mem.eql(u8, list3.items, &[_]u8{0x55, 0x03}));
+        var deserialized3: []bool = undefined;
+        try deserialize([]bool, list3.items, &deserialized3, allocator);
+        defer allocator.free(deserialized3);
+        try expect(std.mem.eql(bool, slice3, deserialized3));
+    }
+}
+
+test "[]bool and Bitlist serialization equivalence" {
+    const allocator = std.testing.allocator;
+
+    // 1. Test with a non-byte-aligned number of bits
+    {
+        const bool_slice = &[_]bool{ true, true, false, true, false }; // 5 bits
+        const Bitlist5 = utils.Bitlist(10);
+        var bitlist = try Bitlist5.init(allocator);
+        defer bitlist.deinit();
+        for (bool_slice) |b| {
+            try bitlist.append(b);
+        }
+
+        var list_for_slice = ArrayList(u8).init(allocator);
+        defer list_for_slice.deinit();
+        try serialize([]const bool, bool_slice, &list_for_slice);
+
+        var list_for_bitlist = ArrayList(u8).init(allocator);
+        defer list_for_bitlist.deinit();
+        try serialize(Bitlist5, bitlist, &list_for_bitlist);
+
+        try expect(std.mem.eql(u8, list_for_slice.items, list_for_bitlist.items));
+        try expect(std.mem.eql(u8, list_for_slice.items, &[_]u8{0x2B}));
+    }
+
+    // 2. Test with a byte-aligned number of bits
+    {
+        const bool_slice_8 = &[_]bool{ true, false, true, false, true, false, true, false }; // 8 bits
+        const Bitlist8 = utils.Bitlist(16);
+        var bitlist8 = try Bitlist8.init(allocator);
+        defer bitlist8.deinit();
+        for (bool_slice_8) |b| {
+            try bitlist8.append(b);
+        }
+
+        var list_for_slice_8 = ArrayList(u8).init(allocator);
+        defer list_for_slice_8.deinit();
+        try serialize([]const bool, bool_slice_8, &list_for_slice_8);
+
+        var list_for_bitlist_8 = ArrayList(u8).init(allocator);
+        defer list_for_bitlist_8.deinit();
+        try serialize(Bitlist8, bitlist8, &list_for_bitlist_8);
+
+        try expect(std.mem.eql(u8, list_for_slice_8.items, list_for_bitlist_8.items));
+        try expect(std.mem.eql(u8, list_for_slice_8.items, &[_]u8{0x55, 0x01}));
+    }
+}
+
+test "[]bool edge cases and error handling" {
+    const allocator = std.testing.allocator;
+
+    // 1. Test invalid empty buffer (no sentinel bit) should fail
+    {
+        const invalid_empty = &[_]u8{};
+        var result: []bool = undefined;
+        const err = deserialize([]bool, invalid_empty, &result, allocator);
+        try std.testing.expectError(error.InvalidBitlistEncoding, err);
+    }
+
+    // 2. Test invalid trailing zero byte should fail
+    {
+        const invalid_trailing_zero = &[_]u8{ 0b00000101, 0x00 };
+        var result: []bool = undefined;
+        const err = deserialize([]bool, invalid_trailing_zero, &result, allocator);
+        try std.testing.expectError(error.BitlistTrailingByteZero, err);
+    }
+
+    // 3. Test single bit (true)
+    {
+        const single_true = &[_]bool{true};
+        var list = ArrayList(u8).init(allocator);
+        defer list.deinit();
+        try serialize([]const bool, single_true, &list);
+        try expect(std.mem.eql(u8, list.items, &[_]u8{0b00000011})); // bit 0 set + sentinel at bit 1
+        var deserialized: []bool = undefined;
+        try deserialize([]bool, list.items, &deserialized, allocator);
+        defer allocator.free(deserialized);
+        try expect(deserialized.len == 1);
+        try expect(deserialized[0] == true);
+    }
+
+    // 4. Test single bit (false)
+    {
+        const single_false = &[_]bool{false};
+        var list = ArrayList(u8).init(allocator);
+        defer list.deinit();
+        try serialize([]const bool, single_false, &list);
+        try expect(std.mem.eql(u8, list.items, &[_]u8{0b00000010})); // bit 0 clear + sentinel at bit 1
+        var deserialized: []bool = undefined;
+        try deserialize([]bool, list.items, &deserialized, allocator);
+        defer allocator.free(deserialized);
+        try expect(deserialized.len == 1);
+        try expect(deserialized[0] == false);
+    }
+
+    // 5. Test all false bits (non-aligned)
+    {
+        const all_false = &[_]bool{ false, false, false, false, false };
+        var list = ArrayList(u8).init(allocator);
+        defer list.deinit();
+        try serialize([]const bool, all_false, &list);
+        // All bits 0-4 are false, sentinel at bit 5
+        try expect(std.mem.eql(u8, list.items, &[_]u8{0b00100000}));
+        var deserialized: []bool = undefined;
+        try deserialize([]bool, list.items, &deserialized, allocator);
+        defer allocator.free(deserialized);
+        try expect(deserialized.len == 5);
+        for (deserialized) |bit| {
+            try expect(bit == false);
+        }
+    }
+
+    // 6. Test all true bits (non-aligned)
+    {
+        const all_true = &[_]bool{ true, true, true, true, true };
+        var list = ArrayList(u8).init(allocator);
+        defer list.deinit();
+        try serialize([]const bool, all_true, &list);
+        // Bits 0-4 are true (0x1F = 0b00011111), sentinel at bit 5
+        try expect(std.mem.eql(u8, list.items, &[_]u8{0b00111111}));
+        var deserialized: []bool = undefined;
+        try deserialize([]bool, list.items, &deserialized, allocator);
+        defer allocator.free(deserialized);
+        try expect(deserialized.len == 5);
+        for (deserialized) |bit| {
+            try expect(bit == true);
+        }
+    }
+
+    // 7. Test large slice spanning multiple bytes
+    {
+        var large_slice: [100]bool = undefined;
+        for (&large_slice, 0..) |*bit, i| {
+            bit.* = (i % 3 == 0); // Pattern: true, false, false, true, false, false, ...
+        }
+        var list = ArrayList(u8).init(allocator);
+        defer list.deinit();
+        try serialize([]const bool, &large_slice, &list);
+        var deserialized: []bool = undefined;
+        try deserialize([]bool, list.items, &deserialized, allocator);
+        defer allocator.free(deserialized);
+        try expect(deserialized.len == 100);
+        try expect(std.mem.eql(bool, &large_slice, deserialized));
+    }
+}
+
 test {
     _ = @import("beacon_tests.zig");
 }

@@ -189,7 +189,31 @@ pub fn serialize(comptime T: type, data: T, l: *ArrayList(u8)) !void {
             switch (pointer.size) {
                 .slice => {
                     if (pointer.child == bool) {
-                        @panic("use util.Bitlist instead of []bool");
+                        if (data.len == 0) {
+                            try l.append(0x01);
+                            return;
+                        }
+
+                        var byte: u8 = 0;
+                        for (data, 0..) |bit, index| {
+                            if (bit) {
+                                byte |= (@as(u8, 1) << @truncate(index % 8));
+                            }
+
+                            if (index % 8 == 7) {
+                                try l.append(byte);
+                                byte = 0;
+                            }
+                        }
+
+                        const remainder = data.len % 8;
+                        if (remainder == 0) {
+                            try l.append(0x01);
+                        } else {
+                            byte |= (@as(u8, 1) << @truncate(remainder));
+                            try l.append(byte);
+                        }
+                        return;
                     }
                     if (@sizeOf(pointer.child) == 1) {
                         _ = try l.writer().write(data);
@@ -366,7 +390,43 @@ pub fn deserialize(comptime T: type, serialized: []const u8, out: *T, allocator:
             }
         },
         .pointer => |ptr| switch (ptr.size) {
-            .slice => if (@sizeOf(ptr.child) == 1) {
+            .slice => if (ptr.child == bool) {
+                const alloc = allocator orelse return error.AllocatorRequired;
+
+                // Empty buffer is invalid, at least sentinel bit should exist
+                if (serialized.len == 0) {
+                    return error.InvalidBitlistEncoding;
+                }
+
+                // Encoded empty bitlist is a single byte 0x01 (sentinel only)
+                if (serialized.len == 1 and serialized[0] == 0x01) {
+                    out.* = try alloc.alloc(bool, 0);
+                    return;
+                }
+
+                const byte_len = serialized.len;
+                const last_byte = serialized[byte_len - 1];
+                if (last_byte == 0) {
+                    return error.BitlistTrailingByteZero;
+                }
+
+                const msb_pos = @as(usize, 8) - @clz(last_byte);
+                const number_of_bits = 8 * (byte_len - 1) + (msb_pos - 1);
+
+                out.* = try alloc.alloc(bool, number_of_bits);
+
+                for (serialized, 0..) |byte, byte_index| {
+                    var i: u4 = 0;
+                    while (i < 8) : (i += 1) {
+                        const bit_index = byte_index * 8 + i;
+                        if (bit_index < number_of_bits) {
+                            out.*[bit_index] = (byte & (@as(u8, 1) << @truncate(i))) != 0;
+                        } else {
+                            break;
+                        }
+                    }
+                }
+            } else if (@sizeOf(ptr.child) == 1) {
                 // Data is not copied in this function, copy is therefore
                 // the responsibility of the caller.
                 if (ptr.is_const) {

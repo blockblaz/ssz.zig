@@ -1595,7 +1595,7 @@ test "validateBitlist - comprehensive validation" {
     // Test empty bitlist
     {
         const empty_buf = [_]u8{};
-        try utils.Bitlist(10).validateBitlist(&empty_buf);
+        try std.testing.expectError(error.InvalidBitlistEncoding, utils.Bitlist(10).validateBitlist(&empty_buf));
     }
 
     // Test bitlist with trailing zero byte

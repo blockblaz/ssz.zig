@@ -3,4 +3,11 @@
     .fingerprint = 0x1d34bd0ceb1dfc2d,
     .version = "0.0.8",
     .paths = .{""},
+    .dependencies = .{
+        .poseidon = .{
+            .url = "https://github.com/blockblaz/zig-poseidon/archive/refs/tags/v0.2.0.tar.gz",
+            .hash = "zig_poseidon-0.2.0-CHeW2H-SAAC83l4JGZOODgmgfEFpBa_KokE9oO3ilcf1",
+        },
+
+    },
 }

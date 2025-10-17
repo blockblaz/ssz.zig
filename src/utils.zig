@@ -7,7 +7,7 @@ const deserialize = lib.deserialize;
 const isFixedSizeObject = lib.isFixedSizeObject;
 const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;
-const sha256 = std.crypto.hash.sha2.Sha256;
+const Hasher = lib.Hasher;
 const hashes_of_zero = @import("./zeros.zig").hashes_of_zero;
 
 // SSZ specification constants
@@ -155,7 +155,7 @@ pub fn List(comptime T: type, comptime N: usize) type {
                     const items_per_chunk = BYTES_PER_CHUNK / bytes_per_item;
                     const chunks_for_max_capacity = (N + items_per_chunk - 1) / items_per_chunk;
                     var tmp: chunk = undefined;
-                    try lib.merkleize(sha256, chunks, chunks_for_max_capacity, &tmp);
+                    try lib.merkleize(Hasher, chunks, chunks_for_max_capacity, &tmp);
                     lib.mixInLength2(tmp, items.len, out);
                 },
                 else => {
@@ -168,7 +168,7 @@ pub fn List(comptime T: type, comptime N: usize) type {
                     }
                     // Always use N (max capacity) for merkleization, even when empty
                     // This ensures proper tree depth according to SSZ specification
-                    try lib.merkleize(sha256, chunks.items, N, &tmp);
+                    try lib.merkleize(Hasher, chunks.items, N, &tmp);
                     lib.mixInLength2(tmp, items.len, out);
                 },
             }
@@ -337,7 +337,7 @@ pub fn Bitlist(comptime N: usize) type {
 
             // Use chunk_count limit as per SSZ specification
             const chunk_count_limit = (N + 255) / 256;
-            try lib.merkleize(sha256, chunks, chunk_count_limit, &tmp);
+            try lib.merkleize(Hasher, chunks, chunk_count_limit, &tmp);
             lib.mixInLength2(tmp, bit_length, out);
         }
 

@@ -120,3 +120,27 @@ test "PoseidonHasher deterministic" {
 
     try std.testing.expectEqualSlices(u8, &output1, &output2);
 }
+
+test "PoseidonHasher different inputs produce different outputs" {
+    // Verify different inputs produce different outputs
+    const poseidon = @import("poseidon");
+    const Hasher = PoseidonHasher(poseidon.Poseidon2KoalaBear16);
+
+    var hasher1 = Hasher.init(.{});
+    var hasher2 = Hasher.init(.{});
+
+    const data1 = "first test data";
+    const data2 = "second test data";
+
+    hasher1.update(data1);
+    hasher2.update(data2);
+
+    var output1: [32]u8 = undefined;
+    var output2: [32]u8 = undefined;
+    hasher1.final(&output1);
+    hasher2.final(&output2);
+
+    // Verify outputs are different
+    const are_equal = std.mem.eql(u8, &output1, &output2);
+    try std.testing.expect(!are_equal);
+}

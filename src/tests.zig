@@ -17,9 +17,9 @@ test "serializes uint8" {
     const data: u8 = 0x55;
     const serialized_data = [_]u8{0x55};
 
-    var list = ArrayList(u8).init(std.testing.allocator);
-    defer list.deinit();
-    try serialize(u8, data, &list);
+    var list = ArrayList(u8){};
+    defer list.deinit(std.testing.allocator);
+    try serialize(u8, data, &list, std.testing.allocator);
     try expect(std.mem.eql(u8, list.items, serialized_data[0..]));
 }
 
@@ -27,9 +27,9 @@ test "serializes uint16" {
     const data: u16 = 0x5566;
     const serialized_data = [_]u8{ 0x66, 0x55 };
 
-    var list = ArrayList(u8).init(std.testing.allocator);
-    defer list.deinit();
-    try serialize(u16, data, &list);
+    var list = ArrayList(u8){};
+    defer list.deinit(std.testing.allocator);
+    try serialize(u16, data, &list, std.testing.allocator);
     try expect(std.mem.eql(u8, list.items, serialized_data[0..]));
 }
 
@@ -37,9 +37,9 @@ test "serializes uint32" {
     const data: u32 = 0x55667788;
     const serialized_data = [_]u8{ 0x88, 0x77, 0x66, 0x55 };
 
-    var list = ArrayList(u8).init(std.testing.allocator);
-    defer list.deinit();
-    try serialize(u32, data, &list);
+    var list = ArrayList(u8){};
+    defer list.deinit(std.testing.allocator);
+    try serialize(u32, data, &list, std.testing.allocator);
     try expect(std.mem.eql(u8, list.items, serialized_data[0..]));
 }
 
@@ -47,34 +47,34 @@ test "serializes a int32" {
     const data: i32 = -(0x11223344);
     const serialized_data = [_]u8{ 0xbc, 0xcc, 0xdd, 0xee };
 
-    var list = ArrayList(u8).init(std.testing.allocator);
-    defer list.deinit();
-    try serialize(i32, data, &list);
+    var list = ArrayList(u8){};
+    defer list.deinit(std.testing.allocator);
+    try serialize(i32, data, &list, std.testing.allocator);
     try expect(std.mem.eql(u8, list.items, serialized_data[0..]));
 }
 
 test "non-byte aligned int serialization fails" {
     const data: u10 = 0x03ff;
-    var list = ArrayList(u8).init(std.testing.allocator);
-    defer list.deinit();
-    try std.testing.expectError(error.InvalidSerializedIntLengthType, serialize(u10, data, &list));
+    var list = ArrayList(u8){};
+    defer list.deinit(std.testing.allocator);
+    try std.testing.expectError(error.InvalidSerializedIntLengthType, serialize(u10, data, &list, std.testing.allocator));
 }
 
 test "serializes bool" {
     var data = false;
     var serialized_data = [_]u8{0x00};
 
-    var list = ArrayList(u8).init(std.testing.allocator);
-    defer list.deinit();
-    try serialize(bool, data, &list);
+    var list = ArrayList(u8){};
+    defer list.deinit(std.testing.allocator);
+    try serialize(bool, data, &list, std.testing.allocator);
     try expect(std.mem.eql(u8, list.items, serialized_data[0..]));
 
     data = true;
     serialized_data = [_]u8{0x01};
 
-    var list2 = ArrayList(u8).init(std.testing.allocator);
-    defer list2.deinit();
-    try serialize(bool, data, &list2);
+    var list2 = ArrayList(u8){};
+    defer list2.deinit(std.testing.allocator);
+    try serialize(bool, data, &list2, std.testing.allocator);
     try expect(std.mem.eql(u8, list2.items, serialized_data[0..]));
 }
 
@@ -83,25 +83,25 @@ test "serializes Bitvector[N] == [N]bool" {
     var serialized_data = [_]u8{0b00001101};
     var exp = serialized_data[0..serialized_data.len];
 
-    var list7 = ArrayList(u8).init(std.testing.allocator);
-    defer list7.deinit();
-    try serialize([7]bool, data7, &list7);
+    var list7 = ArrayList(u8){};
+    defer list7.deinit(std.testing.allocator);
+    try serialize([7]bool, data7, &list7, std.testing.allocator);
     try expect(std.mem.eql(u8, list7.items, exp));
 
     const data8 = [_]bool{ true, false, true, true, false, false, false, true };
     serialized_data = [_]u8{0b10001101};
     exp = serialized_data[0..serialized_data.len];
 
-    var list8 = ArrayList(u8).init(std.testing.allocator);
-    defer list8.deinit();
-    try serialize([8]bool, data8, &list8);
+    var list8 = ArrayList(u8){};
+    defer list8.deinit(std.testing.allocator);
+    try serialize([8]bool, data8, &list8, std.testing.allocator);
     try expect(std.mem.eql(u8, list8.items, exp));
 
     const data12 = [_]bool{ true, false, true, true, false, false, false, true, false, true, false, true };
 
-    var list12 = ArrayList(u8).init(std.testing.allocator);
-    defer list12.deinit();
-    try serialize([12]bool, data12, &list12);
+    var list12 = ArrayList(u8){};
+    defer list12.deinit(std.testing.allocator);
+    try serialize([12]bool, data12, &list12, std.testing.allocator);
     try expect(list12.items.len == 2);
     try expect(list12.items[0] == 141);
     try expect(list12.items[1] == 10);
@@ -110,9 +110,9 @@ test "serializes Bitvector[N] == [N]bool" {
 test "serializes string" {
     const data = "zig zag";
 
-    var list = ArrayList(u8).init(std.testing.allocator);
-    defer list.deinit();
-    try serialize([]const u8, data, &list);
+    var list = ArrayList(u8){};
+    defer list.deinit(std.testing.allocator);
+    try serialize([]const u8, data, &list, std.testing.allocator);
     try expect(std.mem.eql(u8, list.items, data));
 }
 
@@ -120,18 +120,18 @@ test "serializes an array of shorts" {
     const data = [_]u16{ 0xabcd, 0xef01 };
     const serialized = [_]u8{ 0xcd, 0xab, 0x01, 0xef };
 
-    var list = ArrayList(u8).init(std.testing.allocator);
-    defer list.deinit();
-    try serialize([]const u16, data[0..data.len], &list);
+    var list = ArrayList(u8){};
+    defer list.deinit(std.testing.allocator);
+    try serialize([]const u16, data[0..data.len], &list, std.testing.allocator);
     try expect(std.mem.eql(u8, list.items, serialized[0..]));
 }
 
 test "serializes an array of structures" {
-    var list = ArrayList(u8).init(std.testing.allocator);
-    defer list.deinit();
+    var list = ArrayList(u8){};
+    defer list.deinit(std.testing.allocator);
     const exp = [_]u8{ 8, 0, 0, 0, 23, 0, 0, 0, 6, 0, 0, 0, 20, 0, 99, 114, 111, 105, 115, 115, 97, 110, 116, 6, 0, 0, 0, 244, 1, 72, 101, 114, 114, 101, 110, 116, 111, 114, 116, 101 };
 
-    try serialize(@TypeOf(pastries), pastries, &list);
+    try serialize(@TypeOf(pastries), pastries, &list, std.testing.allocator);
     try expect(std.mem.eql(u8, list.items, exp[0..]));
 }
 
@@ -143,9 +143,9 @@ test "serializes a structure without variable fields" {
     };
     const serialized_data = [_]u8{ 1, 3, 0, 0, 0, 1 };
 
-    var list = ArrayList(u8).init(std.testing.allocator);
-    defer list.deinit();
-    try serialize(@TypeOf(data), data, &list);
+    var list = ArrayList(u8){};
+    defer list.deinit(std.testing.allocator);
+    try serialize(@TypeOf(data), data, &list, std.testing.allocator);
     try expect(std.mem.eql(u8, list.items, serialized_data[0..]));
 }
 
@@ -163,10 +163,10 @@ test "(de)serializes a structure with variable fields" {
     };
     const serialized_data = [_]u8{ 9, 0, 0, 0, 32, 14, 0, 0, 0, 74, 97, 109, 101, 115, 68, 69, 86, 32, 73, 110, 99, 46 };
 
-    var list = ArrayList(u8).init(std.testing.allocator);
-    defer list.deinit();
+    var list = ArrayList(u8){};
+    defer list.deinit(std.testing.allocator);
     // Note the `&data` - this is so that `data` is not considered const.
-    try serialize(@TypeOf(&data), &data, &list);
+    try serialize(@TypeOf(&data), &data, &list, std.testing.allocator);
     try expect(std.mem.eql(u8, list.items, serialized_data[0..]));
     var out: @TypeOf(data) = undefined;
     try deserialize(@TypeOf(data), list.items, &out, null);
@@ -186,9 +186,9 @@ test "serializes a structure with optional fields" {
 
     const serialized_data = [_]u8{ 9, 0, 0, 0, 32, 15, 0, 0, 0, 1, 74, 97, 109, 101, 115, 0 };
 
-    var list = ArrayList(u8).init(std.testing.allocator);
-    defer list.deinit();
-    try serialize(@TypeOf(data), data, &list);
+    var list = ArrayList(u8){};
+    defer list.deinit(std.testing.allocator);
+    try serialize(@TypeOf(data), data, &list, std.testing.allocator);
     try expect(std.mem.eql(u8, list.items, serialized_data[0..]));
 
     var deserialized: Employee = undefined;
@@ -202,9 +202,9 @@ test "serializes a structure with optional fields" {
 
 test "serializes an optional object" {
     const null_or_string: ?[]const u8 = null;
-    var list = ArrayList(u8).init(std.testing.allocator);
-    defer list.deinit();
-    try serialize(@TypeOf(null_or_string), null_or_string, &list);
+    var list = ArrayList(u8){};
+    defer list.deinit(std.testing.allocator);
+    try serialize(@TypeOf(null_or_string), null_or_string, &list, std.testing.allocator);
     try expect(list.items.len == 1);
 }
 
@@ -214,16 +214,16 @@ test "serializes a union" {
         boolean: bool,
     };
 
-    var list = ArrayList(u8).init(std.testing.allocator);
-    defer list.deinit();
+    var list = ArrayList(u8){};
+    defer list.deinit(std.testing.allocator);
     const exp = [_]u8{ 0, 210, 4, 0, 0, 0, 0, 0, 0 };
-    try serialize(Payload, Payload{ .int = 1234 }, &list);
+    try serialize(Payload, Payload{ .int = 1234 }, &list, std.testing.allocator);
     try expect(std.mem.eql(u8, list.items, exp[0..]));
 
-    var list2 = ArrayList(u8).init(std.testing.allocator);
-    defer list2.deinit();
+    var list2 = ArrayList(u8){};
+    defer list2.deinit(std.testing.allocator);
     const exp2 = [_]u8{ 1, 1 };
-    try serialize(Payload, Payload{ .boolean = true }, &list2);
+    try serialize(Payload, Payload{ .boolean = true }, &list2, std.testing.allocator);
     try expect(std.mem.eql(u8, list2.items, exp2[0..]));
 
     // Make sure that the code won't try to serialize untagged
@@ -233,9 +233,9 @@ test "serializes a union" {
         boolean: bool,
     };
 
-    var list3 = ArrayList(u8).init(std.testing.allocator);
-    defer list3.deinit();
-    if (serialize(UnTaggedPayload, UnTaggedPayload{ .boolean = false }, &list3)) {
+    var list3 = ArrayList(u8){};
+    defer list3.deinit(std.testing.allocator);
+    if (serialize(UnTaggedPayload, UnTaggedPayload{ .boolean = false }, &list3, std.testing.allocator)) {
         @panic("didn't catch error");
     } else |err| switch (err) {
         error.UnionIsNotTagged => {},
@@ -249,9 +249,9 @@ test "(de)serializes a type with a custom serialization method" {
 
         const Self = @This();
 
-        pub fn sszEncode(self: *const Self, list: *ArrayList(u8)) !void {
-            try list.append(@truncate(self.len));
-            try list.appendSlice(self.buffer[0..self.len]);
+        pub fn sszEncode(self: *const Self, list: *ArrayList(u8), allocator: std.mem.Allocator) !void {
+            try list.append(allocator, @truncate(self.len));
+            try list.appendSlice(allocator, self.buffer[0..self.len]);
         }
 
         pub fn sszDecode(serialized: []const u8, out: *Self, _: ?std.mem.Allocator) !void {
@@ -272,9 +272,9 @@ test "(de)serializes a type with a custom serialization method" {
     before.buffer[0] = 1;
     before.buffer[9] = 100;
 
-    var list = ArrayList(u8).init(std.testing.allocator);
-    defer list.deinit();
-    try serialize(MyCustomSerializingType, before, &list);
+    var list = ArrayList(u8){};
+    defer list.deinit(std.testing.allocator);
+    try serialize(MyCustomSerializingType, before, &list, std.testing.allocator);
 
     try expect(list.items.len == 11);
 
@@ -322,19 +322,19 @@ test "deserializes a Bitvector[N]" {
 }
 
 test "deserializes an Optional" {
-    var list = ArrayList(u8).init(std.testing.allocator);
-    defer list.deinit();
+    var list = ArrayList(u8){};
+    defer list.deinit(std.testing.allocator);
 
     var out: ?u32 = undefined;
     const exp: ?u32 = 10;
-    try serialize(?u32, exp, &list);
+    try serialize(?u32, exp, &list, std.testing.allocator);
     try deserialize(?u32, list.items, &out, null);
     try expect(out.? == exp.?);
 
-    var list2 = ArrayList(u8).init(std.testing.allocator);
-    defer list2.deinit();
+    var list2 = ArrayList(u8){};
+    defer list2.deinit(std.testing.allocator);
 
-    try serialize(?u32, null, &list2);
+    try serialize(?u32, null, &list2, std.testing.allocator);
     try deserialize(?u32, list2.items, &out, null);
     try expect(out == null);
 }
@@ -342,9 +342,9 @@ test "deserializes an Optional" {
 test "deserializes a string" {
     const exp = "croissants";
 
-    var list = ArrayList(u8).init(std.testing.allocator);
-    defer list.deinit();
-    try serialize([]const u8, exp, &list);
+    var list = ArrayList(u8){};
+    defer list.deinit(std.testing.allocator);
+    try serialize([]const u8, exp, &list, std.testing.allocator);
 
     var got: []const u8 = undefined;
 
@@ -378,10 +378,10 @@ const pastries = [_]Pastry{
 
 test "deserializes a structure" {
     var out = Pastry{ .name = "", .weight = 0 };
-    var list = ArrayList(u8).init(std.testing.allocator);
-    defer list.deinit();
+    var list = ArrayList(u8){};
+    defer list.deinit(std.testing.allocator);
 
-    try serialize(Pastry, pastries[0], &list);
+    try serialize(Pastry, pastries[0], &list, std.testing.allocator);
     try deserialize(Pastry, list.items, &out, null);
 
     try expect(pastries[0].weight == out.weight);
@@ -390,10 +390,10 @@ test "deserializes a structure" {
 
 test "deserializes a Vector[N]" {
     var out: [2]Pastry = undefined;
-    var list = ArrayList(u8).init(std.testing.allocator);
-    defer list.deinit();
+    var list = ArrayList(u8){};
+    defer list.deinit(std.testing.allocator);
 
-    try serialize([2]Pastry, pastries, &list);
+    try serialize([2]Pastry, pastries, &list, std.testing.allocator);
     try deserialize(@TypeOf(pastries), list.items, &out, null);
     comptime var i = 0;
     inline while (i < pastries.len) : (i += 1) {
@@ -404,10 +404,10 @@ test "deserializes a Vector[N]" {
 
 test "deserializes an invalid Vector[N] payload" {
     var out: [2]Pastry = undefined;
-    var list = ArrayList(u8).init(std.testing.allocator);
-    defer list.deinit();
+    var list = ArrayList(u8){};
+    defer list.deinit(std.testing.allocator);
 
-    try serialize([2]Pastry, pastries, &list);
+    try serialize([2]Pastry, pastries, &list, std.testing.allocator);
     try std.testing.expectError(error.OffsetExceedsSize, deserialize(@TypeOf(pastries), list.items[0 .. list.items.len / 2], &out, null));
 }
 
@@ -429,12 +429,12 @@ test "deserializes an union" {
 }
 
 test "serialize/deserialize a u256" {
-    var list = ArrayList(u8).init(std.testing.allocator);
-    defer list.deinit();
+    var list = ArrayList(u8){};
+    defer list.deinit(std.testing.allocator);
     const data = [_]u8{0xAA} ** 32;
     var output: [32]u8 = undefined;
 
-    try serialize([32]u8, data, &list);
+    try serialize([32]u8, data, &list, std.testing.allocator);
     try deserialize([32]u8, list.items, &output, null);
 
     try expect(std.mem.eql(u8, data[0..], output[0..]));
@@ -446,9 +446,9 @@ test "(de)serialize a .One pointer in a struct" {
         .a = &a,
     };
 
-    var list = ArrayList(u8).init(std.testing.allocator);
-    defer list.deinit();
-    try serialize(@TypeOf(b), b, &list);
+    var list = ArrayList(u8){};
+    defer list.deinit(std.testing.allocator);
+    try serialize(@TypeOf(b), b, &list, std.testing.allocator);
     var c_val: u32 = undefined;
     var c: @TypeOf(b) = .{ .a = &c_val };
     try deserialize(@TypeOf(b), list.items, &c, std.testing.allocator);
@@ -456,8 +456,8 @@ test "(de)serialize a .One pointer in a struct" {
 }
 
 test "(de)serialize a slice of structs" {
-    var list = ArrayList(u8).init(std.testing.allocator);
-    defer list.deinit();
+    var list = ArrayList(u8){};
+    defer list.deinit(std.testing.allocator);
 
     // force runtime evaluation of the slice using a
     // runtime start and end.
@@ -465,7 +465,7 @@ test "(de)serialize a slice of structs" {
     var end: usize = pastries.len;
     _ = .{ &start, &end };
 
-    try serialize([]Pastry, @constCast(pastries[start..end]), &list);
+    try serialize([]Pastry, @constCast(pastries[start..end]), &list, std.testing.allocator);
 
     // pre-allocated deserialization
     var deser_const_pastries: [pastries.len]Pastry = undefined;
@@ -674,9 +674,9 @@ test "(de)serialize List[N] of fixed-length objects" {
     for (0..10) |i| {
         try attesting_indices.append(i * 100);
     }
-    var list = ArrayList(u8).init(std.testing.allocator);
-    defer list.deinit();
-    try serialize(ListValidatorIndex, attesting_indices, &list);
+    var list = ArrayList(u8){};
+    defer list.deinit(std.testing.allocator);
+    try serialize(ListValidatorIndex, attesting_indices, &list, std.testing.allocator);
     var attesting_indices_deser = try ListValidatorIndex.init(std.testing.allocator);
     defer attesting_indices_deser.deinit();
     try deserialize(ListValidatorIndex, list.items, &attesting_indices_deser, std.testing.allocator);
@@ -693,9 +693,9 @@ test "(de)serialize List[N] of variable-length objects" {
     defer for (0..string_list.len()) |i| {
         std.testing.allocator.free(string_list.get(i) catch unreachable);
     };
-    var list = ArrayList(u8).init(std.testing.allocator);
-    defer list.deinit();
-    try serialize(ListOfStrings, string_list, &list);
+    var list = ArrayList(u8){};
+    defer list.deinit(std.testing.allocator);
+    try serialize(ListOfStrings, string_list, &list, std.testing.allocator);
     var string_list_deser = try ListOfStrings.init(std.testing.allocator);
     defer string_list_deser.deinit();
     try deserialize(ListOfStrings, list.items, &string_list_deser, std.testing.allocator);
@@ -727,9 +727,9 @@ test "(de)serialization of Bitlist[N]" {
     try expect(try bitlist.get(1) == false);
     try expect(try bitlist.get(2) == true);
 
-    var list = ArrayList(u8).init(std.testing.allocator);
-    defer list.deinit();
-    try serialize(@TypeOf(bitlist), bitlist, &list);
+    var list = ArrayList(u8){};
+    defer list.deinit(std.testing.allocator);
+    try serialize(@TypeOf(bitlist), bitlist, &list, std.testing.allocator);
     var bitlist_deser: @TypeOf(bitlist) = undefined;
     try deserialize(@TypeOf(bitlist), list.items, &bitlist_deser, std.testing.allocator);
     defer bitlist_deser.deinit();
@@ -744,9 +744,9 @@ test "(de)serialization of Bitlist[N] when N % 8 != 0" {
     try expect(try bitlist.get(1) == false);
     try expect(try bitlist.get(2) == true);
 
-    var list = ArrayList(u8).init(std.testing.allocator);
-    defer list.deinit();
-    try serialize(@TypeOf(bitlist), bitlist, &list);
+    var list = ArrayList(u8){};
+    defer list.deinit(std.testing.allocator);
+    try serialize(@TypeOf(bitlist), bitlist, &list, std.testing.allocator);
     var bitlist_deser: @TypeOf(bitlist) = undefined;
     try deserialize(@TypeOf(bitlist), list.items, &bitlist_deser, std.testing.allocator);
     defer bitlist_deser.deinit();
@@ -757,9 +757,9 @@ test "(de)serialization of Bitlist[N] when N % 8 != 0" {
 test "(de)serialization of empty Bitlist[N]" {
     var bitlist = try utils.Bitlist(8).init(std.testing.allocator);
     defer bitlist.deinit();
-    var list = ArrayList(u8).init(std.testing.allocator);
-    defer list.deinit();
-    try serialize(@TypeOf(bitlist), bitlist, &list);
+    var list = ArrayList(u8){};
+    defer list.deinit(std.testing.allocator);
+    try serialize(@TypeOf(bitlist), bitlist, &list, std.testing.allocator);
     try expect(std.mem.eql(u8, list.items, &[_]u8{0x01}));
     var bitlist_deser: @TypeOf(bitlist) = undefined;
     try deserialize(@TypeOf(bitlist), list.items, &bitlist_deser, std.testing.allocator);
@@ -771,9 +771,9 @@ test "(de)serialization of empty Bitlist[N]" {
 test "(de)serialization of Bitlist[0]" {
     var bitlist = try utils.Bitlist(0).init(std.testing.allocator);
     defer bitlist.deinit();
-    var list = ArrayList(u8).init(std.testing.allocator);
-    defer list.deinit();
-    try serialize(@TypeOf(bitlist), bitlist, &list);
+    var list = ArrayList(u8){};
+    defer list.deinit(std.testing.allocator);
+    try serialize(@TypeOf(bitlist), bitlist, &list, std.testing.allocator);
     try expect(std.mem.eql(u8, list.items, &[_]u8{0x01}));
     var bitlist_deser: @TypeOf(bitlist) = undefined;
     try deserialize(@TypeOf(bitlist), list.items, &bitlist_deser, std.testing.allocator);
@@ -796,9 +796,9 @@ test "(de)serialization of full Bitlist[N] when N % 8 == 0" {
     try expect(try bitlist.get(1) == false);
     try expect(try bitlist.get(2) == true);
 
-    var list = ArrayList(u8).init(std.testing.allocator);
-    defer list.deinit();
-    try serialize(@TypeOf(bitlist), bitlist, &list);
+    var list = ArrayList(u8){};
+    defer list.deinit(std.testing.allocator);
+    try serialize(@TypeOf(bitlist), bitlist, &list, std.testing.allocator);
 
     // should serialize to 0501
     try expect(std.mem.eql(u8, list.items, &[_]u8{ 0x05, 0x01 }));
@@ -846,9 +846,9 @@ test "structs with nested fixed/variable size u8 array" {
         },
         .signature = [_]u8{2} ** 48,
     };
-    var serialized_fixed_block = std.ArrayList(u8).init(std.testing.allocator);
-    defer serialized_fixed_block.deinit();
-    try serialize(FixedSignedBlock, fixed_signed_block, &serialized_fixed_block);
+    var serialized_fixed_block = std.ArrayList(u8){};
+    defer serialized_fixed_block.deinit(std.testing.allocator);
+    try serialize(FixedSignedBlock, fixed_signed_block, &serialized_fixed_block, std.testing.allocator);
     // 1.2 verified on an equivalent nodejs container implementation
     const expected_serialized_fixed_block = [_]u8{ 9, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 199, 128, 9, 253, 240, 127, 197, 106, 17, 241, 34, 55, 6, 88, 163, 83, 170, 165, 66, 237, 99, 228, 76, 75, 193, 95, 244, 205, 16, 90, 179, 60, 81, 12, 244, 147, 45, 160, 28, 192, 208, 78, 159, 151, 165, 43, 244, 44, 103, 197, 231, 128, 122, 15, 182, 90, 109, 10, 229, 68, 229, 60, 50, 231, 9, 0, 0, 0, 0, 0, 0, 0, 1, 2, 3, 4, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2 };
     try expect(std.mem.eql(u8, serialized_fixed_block.items, expected_serialized_fixed_block[0..]));
@@ -896,9 +896,9 @@ test "structs with nested fixed/variable size u8 array" {
         .signature = [_]u8{2} ** 48,
     };
 
-    var serialized_var_block = std.ArrayList(u8).init(std.testing.allocator);
-    defer serialized_var_block.deinit();
-    try serialize(VarSignedBlock, var_signed_block, &serialized_var_block);
+    var serialized_var_block = std.ArrayList(u8){};
+    defer serialized_var_block.deinit(std.testing.allocator);
+    try serialize(VarSignedBlock, var_signed_block, &serialized_var_block, std.testing.allocator);
     // 2.2 verified on an equivalent nodejs container implementation
     const expected_serialized_var_block = [_]u8{ 52, 0, 0, 0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 9, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 199, 128, 9, 253, 240, 127, 197, 106, 17, 241, 34, 55, 6, 88, 163, 83, 170, 165, 66, 237, 99, 228, 76, 75, 193, 95, 244, 205, 16, 90, 179, 60, 81, 12, 244, 147, 45, 160, 28, 192, 208, 78, 159, 151, 165, 43, 244, 44, 103, 197, 231, 128, 122, 15, 182, 90, 109, 10, 229, 68, 229, 60, 50, 231, 84, 0, 0, 0, 9, 0, 0, 0, 0, 0, 0, 0, 12, 0, 0, 0, 1, 2, 3, 4 };
     try expect(std.mem.eql(u8, serialized_var_block.items, expected_serialized_var_block[0..]));
@@ -1057,9 +1057,9 @@ test "serializedSize correctly calculates List/Bitlist sizes" {
     try list.append(456);
 
     // Verify serializedSize matches actual serialization
-    var serialized = ArrayList(u8).init(std.testing.allocator);
-    defer serialized.deinit();
-    try serialize(ListType, list, &serialized);
+    var serialized = ArrayList(u8){};
+    defer serialized.deinit(std.testing.allocator);
+    try serialize(ListType, list, &serialized, std.testing.allocator);
 
     const calculated_size = try serializedSize(ListType, list);
     try expect(calculated_size == serialized.items.len);
@@ -1072,9 +1072,9 @@ test "serializedSize correctly calculates List/Bitlist sizes" {
     try bitlist.append(false);
     try bitlist.append(true);
 
-    var bitlist_serialized = ArrayList(u8).init(std.testing.allocator);
-    defer bitlist_serialized.deinit();
-    try serialize(BitlistType, bitlist, &bitlist_serialized);
+    var bitlist_serialized = ArrayList(u8){};
+    defer bitlist_serialized.deinit(std.testing.allocator);
+    try serialize(BitlistType, bitlist, &bitlist_serialized, std.testing.allocator);
 
     const bitlist_calculated_size = try serializedSize(BitlistType, bitlist);
     try expect(bitlist_calculated_size == bitlist_serialized.items.len);
@@ -1092,9 +1092,9 @@ test "serializedSize correctly calculates List/Bitlist sizes" {
         .flags = bitlist,
     };
 
-    var struct_serialized = ArrayList(u8).init(std.testing.allocator);
-    defer struct_serialized.deinit();
-    try serialize(StructWithContainers, test_struct, &struct_serialized);
+    var struct_serialized = ArrayList(u8){};
+    defer struct_serialized.deinit(std.testing.allocator);
+    try serialize(StructWithContainers, test_struct, &struct_serialized, std.testing.allocator);
 
     const struct_calculated_size = try serializedSize(StructWithContainers, test_struct);
     try expect(struct_calculated_size == struct_serialized.items.len);
@@ -1227,9 +1227,9 @@ test "zeam stf input" {
     var arena_allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_allocator.deinit();
 
-    var serialized = std.ArrayList(u8).init(arena_allocator.allocator());
-    defer serialized.deinit();
-    try serialize(BeamSTFProverInput, prover_input, &serialized);
+    var serialized = std.ArrayList(u8){};
+    defer serialized.deinit(std.testing.allocator);
+    try serialize(BeamSTFProverInput, prover_input, &serialized, std.testing.allocator);
 
     var prover_input_deserialized: BeamSTFProverInput = undefined;
     try deserialize(BeamSTFProverInput, serialized.items[0..], &prover_input_deserialized, arena_allocator.allocator());
@@ -1243,9 +1243,9 @@ test "serializes uint64" {
     const data: u64 = 0x1122334455667788;
     const serialized_data = [_]u8{ 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11 };
 
-    var list = ArrayList(u8).init(std.testing.allocator);
-    defer list.deinit();
-    try serialize(u64, data, &list);
+    var list = ArrayList(u8){};
+    defer list.deinit(std.testing.allocator);
+    try serialize(u64, data, &list, std.testing.allocator);
     try expect(std.mem.eql(u8, list.items, serialized_data[0..]));
 }
 
@@ -1260,17 +1260,17 @@ test "deserializes uint64" {
 test "serialize max/min integer values" {
     // Max u64
     const max_u64: u64 = std.math.maxInt(u64);
-    var list = ArrayList(u8).init(std.testing.allocator);
-    defer list.deinit();
-    try serialize(u64, max_u64, &list);
+    var list = ArrayList(u8){};
+    defer list.deinit(std.testing.allocator);
+    try serialize(u64, max_u64, &list, std.testing.allocator);
     try expect(list.items.len == 8);
     try expect(std.mem.eql(u8, list.items, &[_]u8{0xFF} ** 8));
 
     // Min i64 (most negative)
     const min_i64: i64 = std.math.minInt(i64);
-    var list2 = ArrayList(u8).init(std.testing.allocator);
-    defer list2.deinit();
-    try serialize(i64, min_i64, &list2);
+    var list2 = ArrayList(u8){};
+    defer list2.deinit(std.testing.allocator);
+    try serialize(i64, min_i64, &list2, std.testing.allocator);
     try expect(list2.items.len == 8);
 }
 
@@ -1381,9 +1381,9 @@ test "Large Bitvector serialization and hash" {
     data[256] = true;
     data[511] = true;
 
-    var list = ArrayList(u8).init(std.testing.allocator);
-    defer list.deinit();
-    try serialize(LargeBitvec, data, &list);
+    var list = ArrayList(u8){};
+    defer list.deinit(std.testing.allocator);
+    try serialize(LargeBitvec, data, &list, std.testing.allocator);
 
     // Should be 512/8 = 64 bytes
     try expect(list.items.len == 64);
@@ -1560,16 +1560,16 @@ test "Nested structure hash tree root" {
 
 test "serialize negative i8 and i16" {
     const val_i8: i8 = -42;
-    var list = ArrayList(u8).init(std.testing.allocator);
-    defer list.deinit();
-    try serialize(i8, val_i8, &list);
+    var list = ArrayList(u8){};
+    defer list.deinit(std.testing.allocator);
+    try serialize(i8, val_i8, &list, std.testing.allocator);
     try expect(list.items.len == 1);
     try expect(list.items[0] == 0xD6); // Two's complement of -42
 
     const val_i16: i16 = -1000;
-    var list2 = ArrayList(u8).init(std.testing.allocator);
-    defer list2.deinit();
-    try serialize(i16, val_i16, &list2);
+    var list2 = ArrayList(u8){};
+    defer list2.deinit(std.testing.allocator);
+    try serialize(i16, val_i16, &list2, std.testing.allocator);
     try expect(list2.items.len == 2);
     // -1000 in two's complement is 0xFC18
     try expect(list2.items[0] == 0x18);
@@ -1579,9 +1579,9 @@ test "serialize negative i8 and i16" {
 test "Zero-length array" {
     const empty: [0]u32 = .{};
 
-    var list = ArrayList(u8).init(std.testing.allocator);
-    defer list.deinit();
-    try serialize([0]u32, empty, &list);
+    var list = ArrayList(u8){};
+    defer list.deinit(std.testing.allocator);
+    try serialize([0]u32, empty, &list, std.testing.allocator);
     try expect(list.items.len == 0);
 
     var hash: [32]u8 = undefined;
@@ -1789,9 +1789,9 @@ test "Simulate BoundedArray behavior vs ArrayList behavior" {
     try expect(try new_bitlist.get(3) == false);
 
     // Test serialization works correctly
-    var serialized = ArrayList(u8).init(std.testing.allocator);
-    defer serialized.deinit();
-    try new_bitlist.sszEncode(&serialized);
+    var serialized = ArrayList(u8){};
+    defer serialized.deinit(std.testing.allocator);
+    try new_bitlist.sszEncode(&serialized, std.testing.allocator);
 
     // This test validates ArrayList migration works
     // We know serialization produces output - exact bytes tested elsewhere
@@ -1825,9 +1825,9 @@ test "SSZ compliance: Bitlist starts empty per spec" {
     var empty_bitlist = try TestBitlist.init(std.testing.allocator);
     defer empty_bitlist.deinit();
 
-    var empty_serialized = ArrayList(u8).init(std.testing.allocator);
-    defer empty_serialized.deinit();
-    try empty_bitlist.sszEncode(&empty_serialized);
+    var empty_serialized = ArrayList(u8){};
+    defer empty_serialized.deinit(std.testing.allocator);
+    try empty_bitlist.sszEncode(&empty_serialized, std.testing.allocator);
 
     // Empty bitlist should serialize to single byte with delimiter bit
     try expect(empty_serialized.items.len == 1);
@@ -1848,9 +1848,9 @@ test "SSZ compliance: Bitlist starts empty per spec" {
     try populated.append(false);
     try populated.append(true);
 
-    var populated_serialized = ArrayList(u8).init(std.testing.allocator);
-    defer populated_serialized.deinit();
-    try populated.sszEncode(&populated_serialized);
+    var populated_serialized = ArrayList(u8){};
+    defer populated_serialized.deinit(std.testing.allocator);
+    try populated.sszEncode(&populated_serialized, std.testing.allocator);
 
     // SSZ spec: [true, false, true] + delimiter at index 3
     // Bits: 0=1, 1=0, 2=1, delimiter=1 at bit 3
@@ -1883,9 +1883,9 @@ test "SSZ external reference vectors" {
     try expect(try decoded_pattern.get(2) == true);
 
     // Reference test 3: Round-trip should produce same bytes as spec
-    var reencoded = ArrayList(u8).init(std.testing.allocator);
-    defer reencoded.deinit();
-    try decoded_pattern.sszEncode(&reencoded);
+    var reencoded = ArrayList(u8){};
+    defer reencoded.deinit(std.testing.allocator);
+    try decoded_pattern.sszEncode(&reencoded, std.testing.allocator);
 
     try expect(reencoded.items.len == 1);
     try expect(reencoded.items[0] == 0x0D);

@@ -115,10 +115,10 @@ pub fn isFixedSizeObject(comptime T: type) !bool {
 
 /// Provides the generic serialization of any `data` var to SSZ. The
 /// serialization is written to the `ArrayList` `l`.
-pub fn serialize(comptime T: type, data: T, l: *ArrayList(u8)) !void {
+pub fn serialize(comptime T: type, data: T, l: *ArrayList(u8), allocator: Allocator) !void {
     // shortcut if the type implements its own encode method
     if (comptime std.meta.hasFn(T, "sszEncode")) {
-        return data.sszEncode(l);
+        return data.sszEncode(l, allocator);
     }
     const info = @typeInfo(T);
     switch (info) {
@@ -132,7 +132,7 @@ pub fn serialize(comptime T: type, data: T, l: *ArrayList(u8)) !void {
                     }
 
                     if (index % 8 == 7) {
-                        try l.append(byte);
+                        try l.append(allocator, byte);
                         byte = 0;
                     }
                 }
@@ -140,7 +140,7 @@ pub fn serialize(comptime T: type, data: T, l: *ArrayList(u8)) !void {
                 // Write the last byte if the length
                 // is not byte-aligned
                 if (data.len % 8 != 0) {
-                    try l.append(byte);
+                    try l.append(allocator, byte);
                 }
             } else {
                 // If the item type is fixed-size, serialize inline,
@@ -148,7 +148,7 @@ pub fn serialize(comptime T: type, data: T, l: *ArrayList(u8)) !void {
                 // serialize each object afterwards.
                 if (try isFixedSizeObject(array.child)) {
                     for (data) |item| {
-                        try serialize(array.child, item, l);
+                        try serialize(array.child, item, l, allocator);
                     }
                 } else {
                     // Size of the buffer before anything is
@@ -157,14 +157,14 @@ pub fn serialize(comptime T: type, data: T, l: *ArrayList(u8)) !void {
 
                     // Reserve the space for the offset
                     for (data) |_| {
-                        _ = try l.writer().writeInt(u32, 0, std.builtin.Endian.little);
+                        _ = try l.writer(allocator).writeInt(u32, 0, std.builtin.Endian.little);
                     }
 
                     // Now serialize one item after the other
                     // and update the offset list with its location.
                     for (data) |item| {
                         std.mem.writeInt(u32, l.items[start .. start + 4][0..4], @truncate(l.items.len), std.builtin.Endian.little);
-                        _ = try serialize(array.child, item, l);
+                        _ = try serialize(array.child, item, l, allocator);
                         start += 4;
                     }
                 }
@@ -172,9 +172,9 @@ pub fn serialize(comptime T: type, data: T, l: *ArrayList(u8)) !void {
         },
         .bool => {
             if (data) {
-                try l.append(1);
+                try l.append(allocator, 1);
             } else {
-                try l.append(0);
+                try l.append(allocator, 0);
             }
         },
         .int => |int| {
@@ -182,7 +182,7 @@ pub fn serialize(comptime T: type, data: T, l: *ArrayList(u8)) !void {
                 8, 16, 32, 64, 128, 256 => {},
                 else => return error.InvalidSerializedIntLengthType,
             }
-            _ = try l.writer().writeInt(T, data, std.builtin.Endian.little);
+            _ = try l.writer(allocator).writeInt(T, data, std.builtin.Endian.little);
         },
         .pointer => |pointer| {
             // Bitlist[N] or list?
@@ -192,11 +192,11 @@ pub fn serialize(comptime T: type, data: T, l: *ArrayList(u8)) !void {
                         @panic("use util.Bitlist instead of []bool");
                     }
                     if (@sizeOf(pointer.child) == 1) {
-                        _ = try l.writer().write(data);
+                        _ = try l.writer(allocator).write(data);
                     } else {
                         if (try isFixedSizeObject(pointer.child)) {
                             for (data) |item| {
-                                try serialize(@TypeOf(item), item, l);
+                                try serialize(@TypeOf(item), item, l, allocator);
                             }
                         } else {
                             // Size of the buffer before anything is
@@ -205,20 +205,20 @@ pub fn serialize(comptime T: type, data: T, l: *ArrayList(u8)) !void {
 
                             // Reserve the space for the offset
                             for (data) |_| {
-                                _ = try l.writer().writeInt(u32, 0, std.builtin.Endian.little);
+                                _ = try l.writer(allocator).writeInt(u32, 0, std.builtin.Endian.little);
                             }
 
                             // Now serialize one item after the other
                             // and update the offset list with its location.
                             for (data) |item| {
                                 std.mem.writeInt(u32, l.items[start .. start + 4][0..4], @truncate(l.items.len), std.builtin.Endian.little);
-                                _ = try serialize(pointer.child, item, l);
+                                _ = try serialize(pointer.child, item, l, allocator);
                                 start += 4;
                             }
                         }
                     }
                 },
-                .one => try serialize(pointer.child, data.*, l),
+                .one => try serialize(pointer.child, data.*, l, allocator),
                 else => return error.UnSupportedPointerType,
             }
         },
@@ -242,13 +242,13 @@ pub fn serialize(comptime T: type, data: T, l: *ArrayList(u8)) !void {
             inline for (info.@"struct".fields) |field| {
                 switch (@typeInfo(field.type)) {
                     .int, .bool => {
-                        try serialize(field.type, @field(data, field.name), l);
+                        try serialize(field.type, @field(data, field.name), l, allocator);
                     },
                     else => {
                         if (try isFixedSizeObject(field.type)) {
-                            try serialize(field.type, @field(data, field.name), l);
+                            try serialize(field.type, @field(data, field.name), l, allocator);
                         } else {
-                            try serialize(u32, @truncate(var_acc), l);
+                            try serialize(u32, @truncate(var_acc), l, allocator);
                             var_acc += try serializedSize(field.type, @field(data, field.name));
                         }
                     },
@@ -264,7 +264,7 @@ pub fn serialize(comptime T: type, data: T, l: *ArrayList(u8)) !void {
                         },
                         else => {
                             if (!try isFixedSizeObject(field.type)) {
-                                try serialize(field.type, @field(data, field.name), l);
+                                try serialize(field.type, @field(data, field.name), l, allocator);
                             }
                         },
                     }
@@ -276,10 +276,10 @@ pub fn serialize(comptime T: type, data: T, l: *ArrayList(u8)) !void {
         // Optionals are like unions, but their 0 value has to be 0.
         .optional => {
             if (data != null) {
-                _ = try l.writer().writeInt(u8, 1, std.builtin.Endian.little);
-                try serialize(info.optional.child, data.?, l);
+                _ = try l.writer(allocator).writeInt(u8, 1, std.builtin.Endian.little);
+                try serialize(info.optional.child, data.?, l, allocator);
             } else {
-                _ = try l.writer().writeInt(u8, 0, std.builtin.Endian.little);
+                _ = try l.writer(allocator).writeInt(u8, 0, std.builtin.Endian.little);
             }
         },
         .@"union" => {
@@ -288,8 +288,8 @@ pub fn serialize(comptime T: type, data: T, l: *ArrayList(u8)) !void {
             }
             inline for (info.@"union".fields, 0..) |f, index| {
                 if (@intFromEnum(data) == index) {
-                    _ = try l.writer().writeInt(u8, index, std.builtin.Endian.little);
-                    try serialize(f.type, @field(data, f.name), l);
+                    _ = try l.writer(allocator).writeInt(u8, index, std.builtin.Endian.little);
+                    try serialize(f.type, @field(data, f.name), l, allocator);
                     return;
                 }
             }
@@ -578,18 +578,18 @@ pub fn chunkCount(comptime T: type) usize {
 const chunk = [BYTES_PER_CHUNK]u8;
 const zero_chunk: chunk = [_]u8{0} ** BYTES_PER_CHUNK;
 
-pub fn pack(comptime T: type, values: T, l: *ArrayList(u8)) ![]chunk {
-    try serialize(T, values, l);
+pub fn pack(comptime T: type, values: T, l: *ArrayList(u8), allocator: Allocator) ![]chunk {
+    try serialize(T, values, l, allocator);
     const padding_size = (BYTES_PER_CHUNK - l.items.len % BYTES_PER_CHUNK) % BYTES_PER_CHUNK;
-    _ = try l.writer().write(zero_chunk[0..padding_size]);
+    _ = try l.writer(allocator).write(zero_chunk[0..padding_size]);
     return std.mem.bytesAsSlice(chunk, l.items);
 }
 
 test "pack u32" {
     var expected: [32]u8 = undefined;
-    var list = ArrayList(u8).init(std.testing.allocator);
-    defer list.deinit();
-    const out = try pack(u32, 0xdeadbeef, &list);
+    var list = ArrayList(u8){};
+    defer list.deinit(std.testing.allocator);
+    const out = try pack(u32, 0xdeadbeef, &list, std.testing.allocator);
 
     _ = try std.fmt.hexToBytes(expected[0..], "efbeadde00000000000000000000000000000000000000000000000000000000");
 
@@ -598,9 +598,9 @@ test "pack u32" {
 
 test "pack bool" {
     var expected: [32]u8 = undefined;
-    var list = ArrayList(u8).init(std.testing.allocator);
-    defer list.deinit();
-    const out = try pack(bool, true, &list);
+    var list = ArrayList(u8){};
+    defer list.deinit(std.testing.allocator);
+    const out = try pack(bool, true, &list, std.testing.allocator);
 
     _ = try std.fmt.hexToBytes(expected[0..], "0100000000000000000000000000000000000000000000000000000000000000");
 
@@ -609,9 +609,9 @@ test "pack bool" {
 
 test "pack string" {
     var expected: [128]u8 = undefined;
-    var list = ArrayList(u8).init(std.testing.allocator);
-    defer list.deinit();
-    const out = try pack([]const u8, "a" ** 100, &list);
+    var list = ArrayList(u8){};
+    defer list.deinit(std.testing.allocator);
+    const out = try pack([]const u8, "a" ** 100, &list, std.testing.allocator);
 
     _ = try std.fmt.hexToBytes(expected[0..], "6161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616100000000000000000000000000000000000000000000000000000000");
 
@@ -667,8 +667,8 @@ pub fn merkleize(hasher: type, chunks: []chunk, limit: ?usize, out: *[32]u8) any
 }
 
 test "merkleize an empty slice" {
-    var list = ArrayList(u8).init(std.testing.allocator);
-    defer list.deinit();
+    var list = ArrayList(u8){};
+    defer list.deinit(std.testing.allocator);
     const chunks = &[0][32]u8{};
     var out: [32]u8 = undefined;
     try merkleize(sha256, chunks, null, &out);
@@ -676,9 +676,9 @@ test "merkleize an empty slice" {
 }
 
 test "merkleize a string" {
-    var list = ArrayList(u8).init(std.testing.allocator);
-    defer list.deinit();
-    const chunks = try pack([]const u8, "a" ** 100, &list);
+    var list = ArrayList(u8){};
+    defer list.deinit(std.testing.allocator);
+    const chunks = try pack([]const u8, "a" ** 100, &list, std.testing.allocator);
     var out: [32]u8 = undefined;
     try merkleize(sha256, chunks, null, &out);
     // Build the expected tree
@@ -704,50 +704,50 @@ test "merkleize a string" {
 }
 
 test "merkleize a boolean" {
-    var list = ArrayList(u8).init(std.testing.allocator);
-    defer list.deinit();
+    var list = ArrayList(u8){};
+    defer list.deinit(std.testing.allocator);
 
-    var chunks = try pack(bool, false, &list);
+    var chunks = try pack(bool, false, &list, std.testing.allocator);
     var expected = [_]u8{0} ** BYTES_PER_CHUNK;
     var out: [BYTES_PER_CHUNK]u8 = undefined;
     try merkleize(sha256, chunks, null, &out);
 
     try std.testing.expect(std.mem.eql(u8, out[0..], expected[0..]));
 
-    var list2 = ArrayList(u8).init(std.testing.allocator);
-    defer list2.deinit();
+    var list2 = ArrayList(u8){};
+    defer list2.deinit(std.testing.allocator);
 
-    chunks = try pack(bool, true, &list2);
+    chunks = try pack(bool, true, &list2, std.testing.allocator);
     expected[0] = 1;
     try merkleize(sha256, chunks, null, &out);
     try std.testing.expect(std.mem.eql(u8, out[0..], expected[0..]));
 }
 
 test "merkleize a bytes16 vector with one element" {
-    var list = ArrayList(u8).init(std.testing.allocator);
-    defer list.deinit();
-    _ = try pack([16]u8, [_]u8{0xaa} ** 16, &list);
+    var list = ArrayList(u8){};
+    defer list.deinit(std.testing.allocator);
+    _ = try pack([16]u8, [_]u8{0xaa} ** 16, &list, std.testing.allocator);
     // var expected: [32]u8 = [_]u8{0xaa} ** 16 ++ [_]u8{0x00} ** 16;
     // var out: [32]u8 = undefined;
     // try merkleize(sha256, chunks, null, &out);
     // try std.testing.expect(std.mem.eql(u8, out[0..], expected[0..]));
 }
 
-fn packBits(bits: []const bool, l: *ArrayList(u8)) ![]chunk {
+fn packBits(bits: []const bool, l: *ArrayList(u8), allocator: Allocator) ![]chunk {
     var byte: u8 = 0;
     for (bits, 0..) |bit, bitidx| {
         if (bit) {
             byte |= @as(u8, 1) << @truncate(7 - bitidx % 8);
         }
         if (bitidx % 8 == 7 or bitidx == bits.len - 1) {
-            try l.append(byte);
+            try l.append(allocator, byte);
             byte = 0;
         }
     }
 
     // pad the last chunk with 0s
     const padding_size = (BYTES_PER_CHUNK - l.items.len % BYTES_PER_CHUNK) % BYTES_PER_CHUNK;
-    _ = try l.writer().write(zero_chunk[0..padding_size]);
+    _ = try l.writer(allocator).write(zero_chunk[0..padding_size]);
 
     return std.mem.bytesAsSlice(chunk, l.items);
 }
@@ -761,9 +761,9 @@ pub fn hashTreeRoot(comptime T: type, value: T, out: *[32]u8, allctr: Allocator)
     const type_info = @typeInfo(T);
     switch (type_info) {
         .int, .bool => {
-            var list = ArrayList(u8).init(allctr);
-            defer list.deinit();
-            const chunks = try pack(T, value, &list);
+            var list = ArrayList(u8){};
+            defer list.deinit(allctr);
+            const chunks = try pack(T, value, &list, allctr);
             try merkleize(sha256, chunks, null, out);
         },
         .array => |a| {
@@ -773,24 +773,24 @@ pub fn hashTreeRoot(comptime T: type, value: T, out: *[32]u8, allctr: Allocator)
             // are the merkle roots of its elements.
             switch (@typeInfo(a.child)) {
                 .int => {
-                    var list = ArrayList(u8).init(allctr);
-                    defer list.deinit();
-                    const chunks = try pack(T, value, &list);
+                    var list = ArrayList(u8){};
+                    defer list.deinit(allctr);
+                    const chunks = try pack(T, value, &list, allctr);
                     try merkleize(sha256, chunks, null, out);
                 },
                 .bool => {
-                    var list = ArrayList(u8).init(allctr);
-                    defer list.deinit();
-                    const chunks = try packBits(value[0..], &list);
+                    var list = ArrayList(u8){};
+                    defer list.deinit(allctr);
+                    const chunks = try packBits(value[0..], &list, allctr);
                     try merkleize(sha256, chunks, chunkCount(T), out);
                 },
                 .array => {
-                    var chunks = ArrayList(chunk).init(allctr);
-                    defer chunks.deinit();
+                    var chunks = ArrayList(chunk){};
+                    defer chunks.deinit(allctr);
                     var tmp: chunk = undefined;
                     for (value) |item| {
                         try hashTreeRoot(@TypeOf(item), item, &tmp, allctr);
-                        try chunks.append(tmp);
+                        try chunks.append(allctr, tmp);
                     }
                     try merkleize(sha256, chunks.items, null, out);
                 },
@@ -803,9 +803,9 @@ pub fn hashTreeRoot(comptime T: type, value: T, out: *[32]u8, allctr: Allocator)
                 .slice => {
                     switch (@typeInfo(ptr.child)) {
                         .int => {
-                            var list = ArrayList(u8).init(allctr);
-                            defer list.deinit();
-                            const chunks = try pack(T, value, &list);
+                            var list = ArrayList(u8){};
+                            defer list.deinit(allctr);
+                            const chunks = try pack(T, value, &list, allctr);
                             var tmp: chunk = undefined;
                             try merkleize(sha256, chunks, null, &tmp);
                             mixInLength2(tmp, value.len, out);
@@ -814,12 +814,12 @@ pub fn hashTreeRoot(comptime T: type, value: T, out: *[32]u8, allctr: Allocator)
                         .bool => return error.UnSupportedPointerType,
                         // composite type
                         else => {
-                            var chunks = ArrayList(chunk).init(allctr);
-                            defer chunks.deinit();
+                            var chunks = ArrayList(chunk){};
+                            defer chunks.deinit(allctr);
                             var tmp: chunk = undefined;
                             for (value) |item| {
                                 try hashTreeRoot(@TypeOf(item), item, &tmp, allctr);
-                                try chunks.append(tmp);
+                                try chunks.append(allctr, tmp);
                             }
                             try merkleize(sha256, chunks.items, null, &tmp);
                             mixInLength2(tmp, chunks.items.len, out);
@@ -830,12 +830,12 @@ pub fn hashTreeRoot(comptime T: type, value: T, out: *[32]u8, allctr: Allocator)
             }
         },
         .@"struct" => |str| {
-            var chunks = ArrayList(chunk).init(allctr);
-            defer chunks.deinit();
+            var chunks = ArrayList(chunk){};
+            defer chunks.deinit(allctr);
             var tmp: chunk = undefined;
             inline for (str.fields) |f| {
                 try hashTreeRoot(f.type, @field(value, f.name), &tmp, allctr);
-                try chunks.append(tmp);
+                try chunks.append(allctr, tmp);
             }
             try merkleize(sha256, chunks.items, null, out);
         },

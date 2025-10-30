@@ -1,35 +1,49 @@
-const Builder = @import("std").Build;
+const std = @import("std");
+const Build = std.Build;
 
-pub fn build(b: *Builder) void {
+pub fn build(b: *Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const mod = b.addModule("ssz.zig", Builder.Module.CreateOptions{
+    const mod = b.addModule("ssz.zig", .{
         .root_source_file = b.path("src/lib.zig"),
         .target = target,
         .optimize = optimize,
     });
 
-    const lib = b.addStaticLibrary(.{
-        .name = "ssz",
-        .root_source_file = .{ .cwd_relative = "src/lib.zig" },
-        .optimize = optimize,
+    const lib_module = b.createModule(.{
+        .root_source_file = b.path("src/lib.zig"),
         .target = target,
+        .optimize = optimize,
+    });
+
+    const lib = b.addLibrary(.{
+        .name = "ssz",
+        .root_module = lib_module,
     });
     b.installArtifact(lib);
 
-    const main_tests = b.addTest(.{
-        .root_source_file = .{ .cwd_relative = "src/lib.zig" },
-        .optimize = optimize,
+    const main_tests_module = b.createModule(.{
+        .root_source_file = b.path("src/lib.zig"),
         .target = target,
+        .optimize = optimize,
+    });
+
+    const main_tests = b.addTest(.{
+        .root_module = main_tests_module,
     });
     const run_main_tests = b.addRunArtifact(main_tests);
-    const tests_tests = b.addTest(.{
-        .root_source_file = .{ .cwd_relative = "src/tests.zig" },
-        .optimize = optimize,
+
+    const tests_tests_module = b.createModule(.{
+        .root_source_file = b.path("src/tests.zig"),
         .target = target,
+        .optimize = optimize,
     });
-    tests_tests.root_module.addImport("ssz.zig", mod);
+    tests_tests_module.addImport("ssz.zig", mod);
+
+    const tests_tests = b.addTest(.{
+        .root_module = tests_tests_module,
+    });
     const run_tests_tests = b.addRunArtifact(tests_tests);
 
     const test_step = b.step("test", "Run library tests");

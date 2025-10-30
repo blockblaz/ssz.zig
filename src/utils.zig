@@ -30,9 +30,10 @@ pub fn List(comptime T: type, comptime N: usize) type {
         const OFFSET_SIZE = 4;
 
         inner: Inner,
+        allocator: Allocator,
 
-        pub fn sszEncode(self: *const Self, l: *ArrayList(u8)) !void {
-            try serialize([]const Item, self.constSlice(), l);
+        pub fn sszEncode(self: *const Self, l: *ArrayList(u8), allocator: Allocator) !void {
+            try serialize([]const Item, self.constSlice(), l, allocator);
         }
 
         pub fn isFixedSizeObject() bool {
@@ -51,7 +52,7 @@ pub fn List(comptime T: type, comptime N: usize) type {
                     serialized.len / (try lib.serializedFixedSize(Self.Item))
                 else
                     serialized.len / 8; // Conservative estimate for dynamic types
-                try out.inner.ensureTotalCapacity(estimated_capacity);
+                try out.inner.ensureTotalCapacity(alloc, estimated_capacity);
             }
 
             if (Self.Item == bool) {
@@ -85,14 +86,14 @@ pub fn List(comptime T: type, comptime N: usize) type {
                     if (i > 0 and start < indices[i - 1]) {
                         return error.OffsetOrdering;
                     }
-                    const item = try out.inner.addOne();
+                    const item = try out.inner.addOne(alloc);
                     try deserialize(Self.Item, serialized[start..end], item, allocator);
                 }
             }
         }
 
         pub fn init(allocator: Allocator) !Self {
-            return .{ .inner = Inner.init(allocator) };
+            return .{ .inner = Inner{}, .allocator = allocator };
         }
 
         pub fn eql(self: *const Self, other: *Self) bool {
@@ -100,12 +101,12 @@ pub fn List(comptime T: type, comptime N: usize) type {
         }
 
         pub fn deinit(self: *Self) void {
-            self.inner.deinit();
+            self.inner.deinit(self.allocator);
         }
 
         pub fn append(self: *Self, item: Self.Item) error{ Overflow, OutOfMemory }!void {
             if (self.inner.items.len >= N) return error.Overflow;
-            return self.inner.append(item);
+            return self.inner.append(self.allocator, item);
         }
 
         pub fn slice(self: *Self) []T {
@@ -118,9 +119,9 @@ pub fn List(comptime T: type, comptime N: usize) type {
 
         pub fn fromSlice(allocator: Allocator, m: []const T) !Self {
             if (m.len > N) return error.Overflow;
-            var inner = Inner.init(allocator);
-            try inner.appendSlice(m);
-            return .{ .inner = inner };
+            var inner = Inner{};
+            try inner.appendSlice(allocator, m);
+            return .{ .inner = inner, .allocator = allocator };
         }
 
         pub fn get(self: Self, i: usize) error{IndexOutOfBounds}!T {
@@ -147,9 +148,9 @@ pub fn List(comptime T: type, comptime N: usize) type {
 
             switch (@typeInfo(Item)) {
                 .int => {
-                    var list = ArrayList(u8).init(allctr);
-                    defer list.deinit();
-                    const chunks = try lib.pack([]const Item, items, &list);
+                    var list = ArrayList(u8){};
+                    defer list.deinit(allctr);
+                    const chunks = try lib.pack([]const Item, items, &list, allctr);
 
                     const bytes_per_item = @sizeOf(Item);
                     const items_per_chunk = BYTES_PER_CHUNK / bytes_per_item;
@@ -159,12 +160,12 @@ pub fn List(comptime T: type, comptime N: usize) type {
                     lib.mixInLength2(tmp, items.len, out);
                 },
                 else => {
-                    var chunks = ArrayList(chunk).init(allctr);
-                    defer chunks.deinit();
+                    var chunks = ArrayList(chunk){};
+                    defer chunks.deinit(allctr);
                     var tmp: chunk = undefined;
                     for (items) |item| {
                         try lib.hashTreeRoot(Item, item, &tmp, allctr);
-                        try chunks.append(tmp);
+                        try chunks.append(allctr, tmp);
                     }
                     // Always use N (max capacity) for merkleization, even when empty
                     // This ensures proper tree depth according to SSZ specification
@@ -207,24 +208,25 @@ pub fn Bitlist(comptime N: usize) type {
 
         inner: Inner,
         length: usize,
+        allocator: Allocator,
 
-        pub fn sszEncode(self: *const Self, l: *ArrayList(u8)) !void {
+        pub fn sszEncode(self: *const Self, l: *ArrayList(u8), allocator: Allocator) !void {
             if (self.length == 0) {
-                try l.append(@as(u8, 1));
+                try l.append(allocator, @as(u8, 1));
                 return;
             }
 
             // slice has at least one byte, appends all
             // non-terminal bytes.
             const slice = self.inner.items;
-            try l.appendSlice(slice[0 .. slice.len - 1]);
+            try l.appendSlice(allocator, slice[0 .. slice.len - 1]);
 
             if (self.length % 8 == 0) {
                 // sentinel is extra byte
-                try l.append(slice[slice.len - 1]);
-                try l.append(1);
+                try l.append(allocator, slice[slice.len - 1]);
+                try l.append(allocator, 1);
             } else {
-                try l.append(slice[slice.len - 1] | @shlExact(@as(u8, 1), @truncate(self.length % 8)));
+                try l.append(allocator, slice[slice.len - 1] | @shlExact(@as(u8, 1), @truncate(self.length % 8)));
             }
         }
 
@@ -243,7 +245,7 @@ pub fn Bitlist(comptime N: usize) type {
             // FastSSZ-style capacity optimization: pre-allocate based on input size
             const byte_capacity = serialized.len;
             if (byte_capacity > 0) {
-                try out.inner.ensureTotalCapacity(byte_capacity);
+                try out.inner.ensureTotalCapacity(alloc, byte_capacity);
             }
 
             // Parse the bit structure (validation already confirmed it's valid)
@@ -253,7 +255,7 @@ pub fn Bitlist(comptime N: usize) type {
             while (last_byte & @shlExact(@as(usize, 1), @truncate(bit_len)) == 0) : (bit_len -= 1) {}
 
             // insert all full bytes
-            try out.*.inner.insertSlice(0, serialized[0..byte_len]);
+            try out.*.inner.insertSlice(alloc, 0, serialized[0..byte_len]);
             out.*.length = 8 * byte_len;
 
             // insert last bits
@@ -269,7 +271,7 @@ pub fn Bitlist(comptime N: usize) type {
         }
 
         pub fn init(allocator: Allocator) !Self {
-            return .{ .inner = Inner.init(allocator), .length = 0 };
+            return .{ .inner = Inner{}, .length = 0, .allocator = allocator };
         }
 
         pub fn get(self: Self, i: usize) error{IndexOutOfBounds}!bool {
@@ -287,7 +289,7 @@ pub fn Bitlist(comptime N: usize) type {
         pub fn append(self: *Self, item: bool) error{ Overflow, OutOfMemory, IndexOutOfBounds }!void {
             if (self.length >= N) return error.Overflow;
             if (self.length % 8 == 0) {
-                try self.inner.append(0);
+                try self.inner.append(self.allocator, 0);
             }
             self.length += 1;
             try self.set(self.length - 1, item);
@@ -298,7 +300,7 @@ pub fn Bitlist(comptime N: usize) type {
         }
 
         pub fn deinit(self: *Self) void {
-            self.inner.deinit();
+            self.inner.deinit(self.allocator);
         }
 
         pub fn eql(self: *const Self, other: *Self) bool {
@@ -313,13 +315,13 @@ pub fn Bitlist(comptime N: usize) type {
         pub fn hashTreeRoot(self: *const Self, out: *[32]u8, allctr: Allocator) !void {
             const bit_length = self.length;
 
-            var bitfield_bytes = ArrayList(u8).init(allctr);
-            defer bitfield_bytes.deinit();
+            var bitfield_bytes = ArrayList(u8){};
+            defer bitfield_bytes.deinit(allctr);
 
             if (bit_length > 0) {
                 // Get the internal bit data since we don't store delimiter
                 const slice = self.inner.items;
-                try bitfield_bytes.appendSlice(slice[0..slice.len]);
+                try bitfield_bytes.appendSlice(allctr, slice[0..slice.len]);
 
                 // Remove trailing zeros but keep at least one byte
                 // This avoids the wasteful pattern of removing all zeros then adding back a chunk
@@ -330,7 +332,7 @@ pub fn Bitlist(comptime N: usize) type {
 
             // Pack bits into chunks (pad to chunk boundary)
             const padding_size = (BYTES_PER_CHUNK - bitfield_bytes.items.len % BYTES_PER_CHUNK) % BYTES_PER_CHUNK;
-            _ = try bitfield_bytes.writer().write(zero_chunk[0..padding_size]);
+            _ = try bitfield_bytes.writer(allctr).write(zero_chunk[0..padding_size]);
 
             const chunks = std.mem.bytesAsSlice(chunk, bitfield_bytes.items);
             var tmp: chunk = undefined;

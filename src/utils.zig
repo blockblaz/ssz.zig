@@ -95,8 +95,20 @@ pub fn List(comptime T: type, comptime N: usize) type {
             return .{ .inner = Inner.init(allocator) };
         }
 
-        pub fn eql(self: *const Self, other: *Self) bool {
-            return std.mem.eql(Self.Item, self.constSlice(), other.constSlice());
+        pub fn eql(self: *const Self, other: *const Self) bool {
+            if (self.len() != other.len()) return false;
+
+            const self_slice = self.constSlice();
+            const other_slice = other.constSlice();
+
+            // For struct/array types, use std.meta.eql for proper deep comparison
+            if (@typeInfo(Self.Item) == .@"struct" or @typeInfo(Self.Item) == .array) {
+                return std.meta.eql(self_slice, other_slice);
+            } else {
+                // For a slice of primitive types, it's faster to do a memory
+                // comparison.
+                return std.mem.eql(Self.Item, self_slice, other_slice);
+            }
         }
 
         pub fn deinit(self: *Self) void {
@@ -303,7 +315,7 @@ pub fn Bitlist(comptime N: usize) type {
             self.inner.deinit();
         }
 
-        pub fn eql(self: *const Self, other: *Self) bool {
+        pub fn eql(self: *const Self, other: *const Self) bool {
             return (self.length == other.length) and std.mem.eql(u8, self.inner.items, other.inner.items);
         }
 

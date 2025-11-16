@@ -103,12 +103,10 @@ pub fn List(comptime T: type, comptime N: usize) type {
 
             // For struct/array types, use std.meta.eql for proper deep comparison
             if (@typeInfo(Self.Item) == .@"struct" or @typeInfo(Self.Item) == .array) {
-                for (self_slice, other_slice) |a, b| {
-                    if (!std.meta.eql(a, b)) return false;
-                }
-                return true;
+                return std.meta.eql(self_slice, other_slice);
             } else {
-                // For primitive types, use std.mem.eql
+                // For a slice of primitive types, it's faster to do a memory
+                // comparison.
                 return std.mem.eql(Self.Item, self_slice, other_slice);
             }
         }
@@ -318,7 +316,6 @@ pub fn Bitlist(comptime N: usize) type {
         }
 
         pub fn eql(self: *const Self, other: *const Self) bool {
-            // Compare lengths first, then use std.mem.eql for slice contents
             return (self.length == other.length) and std.mem.eql(u8, self.inner.items, other.inner.items);
         }
 

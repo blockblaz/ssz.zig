@@ -39,54 +39,33 @@ pub fn build(b: *Builder) void {
 
     // Poseidon hasher build options
     const poseidon_enabled = b.option(bool, "poseidon", "Enable Poseidon2 hash support") orelse false;
-    const poseidon_field = b.option([]const u8, "poseidon-field", "Poseidon2 field variant (babybear|koalabear)") orelse "koalabear";
-
-    // Validate poseidon fields
     if (poseidon_enabled) {
-        const valid_fields = [_][]const u8{ "babybear", "koalabear" };
-        var field_valid = false;
-        for (valid_fields) |valid_field| {
-            if (std.mem.eql(u8, poseidon_field, valid_field)) {
-                field_valid = true;
-                break;
-            }
-        }
-        if (!field_valid) {
-            std.log.err("Invalid Poseidon2 field configuration: '{s}'", .{poseidon_field});
-            std.log.err("Valid field options are:\n1) 'koalabear'\n2) 'babybear'", .{});
-            std.log.err("Usage examples:", .{});
-            std.log.err("zig build -Dposeidon=true -Dposeidon-field=koalabear", .{});
-            std.log.err("zig build -Dposeidon=true -Dposeidon-field=koalabear", .{});
-            std.log.err("If no field is specified 'koalabear' will be used as the default.", .{});
-        }
-
-        std.log.info("Poseidon2 enabled with field: '{s}'", .{poseidon_field});
+        std.log.info("Poseidon2 enabled (koalabear, Poseidon2-24 Plonky3)", .{});
     }
 
     // Create build options
     const options = b.addOptions();
     options.addOption(bool, "poseidon_enabled", poseidon_enabled);
-    options.addOption([]const u8, "poseidon_field", poseidon_field);
 
-    // Get poseidon dependency once if enabled
-    const poseidon_module = if (poseidon_enabled) blk: {
-        const poseidon_dep = b.dependency("poseidon", .{
+    // Poseidon2 implementation via hash-zig dependency
+    const hashzig_module = if (poseidon_enabled) blk: {
+        const hashzig_dep = b.dependency("hash_zig", .{
             .target = target,
             .optimize = optimize,
         });
-        break :blk poseidon_dep.module("poseidon");
+        break :blk hashzig_dep.module("hash-zig");
     } else null;
 
     // Add build options and poseidon import to all artifacts
     mod.addOptions("build_options", options);
-    if (poseidon_module) |pm| mod.addImport("poseidon", pm);
+    if (hashzig_module) |pm| mod.addImport("hash_zig", pm);
 
     lib.root_module.addOptions("build_options", options);
-    if (poseidon_module) |pm| lib.root_module.addImport("poseidon", pm);
+    if (hashzig_module) |pm| lib.root_module.addImport("hash_zig", pm);
 
     main_tests.root_module.addOptions("build_options", options);
-    if (poseidon_module) |pm| main_tests.root_module.addImport("poseidon", pm);
+    if (hashzig_module) |pm| main_tests.root_module.addImport("hash_zig", pm);
 
     tests_tests.root_module.addOptions("build_options", options);
-    if (poseidon_module) |pm| tests_tests.root_module.addImport("poseidon", pm);
+    if (hashzig_module) |pm| tests_tests.root_module.addImport("hash_zig", pm);
 }

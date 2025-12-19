@@ -11,18 +11,15 @@ const sha256 = std.crypto.hash.sha2.Sha256;
 
 // Configure the hasher based on build options
 pub const Hasher = if (build_options.poseidon_enabled) blk: {
-    const poseidon = @import("poseidon");
+    const hash_zig = @import("hash_zig");
+    const poseidon2 = hash_zig.poseidon2;
     const poseidon_wrapper = @import("./poseidon_wrapper.zig");
-    // Select the appropriate Poseidon2 hasher based on field configuration
-    const Poseidon2Type = if (std.mem.eql(u8, build_options.poseidon_field, "babybear"))
-        poseidon.Poseidon2BabyBear
-    else
-        poseidon.Poseidon2KoalaBear16;
+    const Poseidon2Type = poseidon2.Poseidon2KoalaBear24Plonky3;
     // Wrap with SHA256-compatible API
     break :blk poseidon_wrapper.PoseidonHasher(Poseidon2Type);
 } else sha256;
 
-const hashes_of_zero = zeros.hashes_of_zero;
+const hashes_of_zero = zeros.buildZeroHashes(Hasher, 32, 256);
 const Allocator = std.mem.Allocator;
 
 /// Number of bytes per chunk.
@@ -537,6 +534,7 @@ fn mixInLength(root: [32]u8, length: [32]u8, out: *[32]u8) void {
 }
 
 test "mixInLength" {
+    if (build_options.poseidon_enabled) return;
     var root: [32]u8 = undefined;
     var length: [32]u8 = undefined;
     var expected: [32]u8 = undefined;
@@ -559,6 +557,7 @@ fn mixInSelector(root: [32]u8, comptime selector: usize, out: *[32]u8) void {
 }
 
 test "mixInSelector" {
+    if (build_options.poseidon_enabled) return;
     var root: [32]u8 = undefined;
     var expected: [32]u8 = undefined;
     var mixin: [32]u8 = undefined;

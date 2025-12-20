@@ -7,6 +7,7 @@ const chunkCount = libssz.chunkCount;
 const hashTreeRoot = libssz.hashTreeRoot;
 const isFixedSizeObject = libssz.isFixedSizeObject;
 const std = @import("std");
+const build_options = @import("build_options");
 const ArrayList = std.ArrayList;
 const expect = std.testing.expect;
 const expectError = std.testing.expectError;
@@ -529,6 +530,8 @@ const d_bits = bytesToBits(16, d_bytes);
 const e_bits = bytesToBits(16, e_bytes);
 
 test "calculate the root hash of a boolean" {
+    // SHA-specific expected vectors; skip when Poseidon is enabled.
+    if (build_options.poseidon_enabled) return;
     var expected = [_]u8{1} ++ [_]u8{0} ** 31;
     var hashed: [32]u8 = undefined;
     try hashTreeRoot(bool, true, &hashed, std.testing.allocator);
@@ -540,6 +543,7 @@ test "calculate the root hash of a boolean" {
 }
 
 test "calculate root hash of an array of two Bitvector[128]" {
+    if (build_options.poseidon_enabled) return;
     const deserialized: [2][128]bool = [2][128]bool{ a_bits, b_bits };
     var hashed: [32]u8 = undefined;
     try hashTreeRoot(@TypeOf(deserialized), deserialized, &hashed, std.testing.allocator);
@@ -559,6 +563,7 @@ test "calculate the root hash of an array of integers" {
 }
 
 test "calculate root hash of an array of three Bitvector[128]" {
+    if (build_options.poseidon_enabled) return;
     const deserialized: [3][128]bool = [3][128]bool{ a_bits, b_bits, c_bits };
     var hashed: [32]u8 = undefined;
     try hashTreeRoot(@TypeOf(deserialized), deserialized, &hashed, std.testing.allocator);
@@ -578,6 +583,7 @@ test "calculate root hash of an array of three Bitvector[128]" {
 }
 
 test "calculate the root hash of an array of five Bitvector[128]" {
+    if (build_options.poseidon_enabled) return;
     const deserialized = [5][128]bool{ a_bits, b_bits, c_bits, d_bits, e_bits };
     var hashed: [32]u8 = undefined;
     try hashTreeRoot(@TypeOf(deserialized), deserialized, &hashed, std.testing.allocator);
@@ -616,6 +622,7 @@ const Fork = struct {
 };
 
 test "calculate the root hash of a structure" {
+    if (build_options.poseidon_enabled) return;
     var hashed: [32]u8 = undefined;
     const fork = Fork{
         .previous_version = [_]u8{ 0x9c, 0xe2, 0x5d, 0x26 },
@@ -629,6 +636,7 @@ test "calculate the root hash of a structure" {
 }
 
 test "calculate the root hash of an Optional" {
+    if (build_options.poseidon_enabled) return;
     var hashed: [32]u8 = undefined;
     var payload: [64]u8 = undefined;
     const v: ?u32 = null;
@@ -647,6 +655,7 @@ test "calculate the root hash of an Optional" {
 }
 
 test "calculate the root hash of an union" {
+    if (build_options.poseidon_enabled) return;
     const Payload = union(enum) {
         int: u64,
         boolean: bool,
@@ -919,6 +928,7 @@ test "structs with nested fixed/variable size u8 array" {
 }
 
 test "slice hashtree root composite type" {
+    if (build_options.poseidon_enabled) return;
     const Root = [32]u8;
     const RootsList = []Root;
     const test_root = [_]u8{23} ** 32;
@@ -938,6 +948,7 @@ test "slice hashtree root composite type" {
 }
 
 test "slice hashtree root simple type" {
+    if (build_options.poseidon_enabled) return;
     const DynamicRoot = []u8;
     // merkelizes as List[u8,33] as dynamic data length is mixed in as bounded type
     var test_root = [_]u8{23} ** 33;
@@ -955,6 +966,7 @@ test "slice hashtree root simple type" {
 }
 
 test "List tree root calculation" {
+    if (build_options.poseidon_enabled) return;
     const ListU64 = utils.List(u64, 1024);
 
     var empty_list = try ListU64.init(std.testing.allocator);
@@ -1275,6 +1287,7 @@ test "serialize max/min integer values" {
 }
 
 test "Empty List hash tree root" {
+    if (build_options.poseidon_enabled) return;
     const ListU32 = utils.List(u32, 100);
     var empty_list = try ListU32.init(std.testing.allocator);
     defer empty_list.deinit();
@@ -1293,6 +1306,7 @@ test "Empty List hash tree root" {
 }
 
 test "Empty BitList(<=256) hash tree root" {
+    if (build_options.poseidon_enabled) return;
     const BitListLen100 = utils.Bitlist(100);
     var empty_list = try BitListLen100.init(std.testing.allocator);
     defer empty_list.deinit();
@@ -1310,6 +1324,7 @@ test "Empty BitList(<=256) hash tree root" {
 }
 
 test "Empty BitList (>256) hash tree root" {
+    if (build_options.poseidon_enabled) return;
     const BitListLen100 = utils.Bitlist(2570);
     var empty_list = try BitListLen100.init(std.testing.allocator);
     defer empty_list.deinit();
@@ -1327,6 +1342,7 @@ test "Empty BitList (>256) hash tree root" {
 }
 
 test "List at maximum capacity" {
+    if (build_options.poseidon_enabled) return;
     const ListU8 = utils.List(u8, 4);
     var full_list = try ListU8.init(std.testing.allocator);
     defer full_list.deinit();
@@ -1355,6 +1371,8 @@ test "List at maximum capacity" {
 }
 
 test "Array hash tree root" {
+    // SHA-specific expected vectors; skip when Poseidon is enabled.
+    if (build_options.poseidon_enabled) return;
     const data: [4]u32 = .{ 1, 2, 3, 4 };
 
     var hash: [32]u8 = undefined;
@@ -1394,6 +1412,8 @@ test "Large Bitvector serialization and hash" {
     try expect(list.items[32] & 0x01 == 0x01); // bit 256 -> LSB of byte 32
     try expect(list.items[63] & 0x80 == 0x80); // bit 511 -> MSB of byte 63
 
+    if (build_options.poseidon_enabled) return;
+
     // Test hash tree root
     var hash: [32]u8 = undefined;
     try hashTreeRoot(LargeBitvec, data, &hash, std.testing.allocator);
@@ -1407,6 +1427,7 @@ test "Large Bitvector serialization and hash" {
 }
 
 test "Bitlist edge cases" {
+    if (build_options.poseidon_enabled) return;
     const TestBitlist = utils.Bitlist(100);
 
     // All false
@@ -1448,6 +1469,7 @@ test "Bitlist edge cases" {
 }
 
 test "Bitlist trailing zeros optimization" {
+    if (build_options.poseidon_enabled) return;
     const TestBitlist = utils.Bitlist(256);
 
     // Test case 1: 8 false bits - should result in one 0x00 byte after pack_bits
@@ -1497,6 +1519,8 @@ test "Bitlist trailing zeros optimization" {
 }
 
 test "uint256 hash tree root" {
+    // SHA-specific expected vectors; skip when Poseidon is enabled.
+    if (build_options.poseidon_enabled) return;
     const data: u256 = 0x0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF;
 
     var hash: [32]u8 = undefined;
@@ -1511,6 +1535,7 @@ test "uint256 hash tree root" {
 }
 
 test "Single element List" {
+    if (build_options.poseidon_enabled) return;
     const ListU64 = utils.List(u64, 10);
     var single = try ListU64.init(std.testing.allocator);
     defer single.deinit();
@@ -1529,6 +1554,7 @@ test "Single element List" {
 }
 
 test "Nested structure hash tree root" {
+    if (build_options.poseidon_enabled) return;
     const Inner = struct {
         a: u32,
         b: u64,
@@ -1577,6 +1603,8 @@ test "serialize negative i8 and i16" {
 }
 
 test "Zero-length array" {
+    // SHA-specific expected vectors; skip when Poseidon is enabled.
+    if (build_options.poseidon_enabled) return;
     const empty: [0]u32 = .{};
 
     var list = ArrayList(u8).init(std.testing.allocator);

@@ -33,10 +33,6 @@ pub fn build(b: *Builder) void {
     tests_tests.root_module.addImport("ssz.zig", mod);
     const run_tests_tests = b.addRunArtifact(tests_tests);
 
-    const test_step = b.step("test", "Run library tests");
-    test_step.dependOn(&run_main_tests.step);
-    test_step.dependOn(&run_tests_tests.step);
-
     // Poseidon hasher build options
     const poseidon_enabled = b.option(bool, "poseidon", "Enable Poseidon2 hash support") orelse false;
     if (poseidon_enabled) {
@@ -68,4 +64,21 @@ pub fn build(b: *Builder) void {
 
     tests_tests.root_module.addOptions("build_options", options);
     if (hashzig_module) |pm| tests_tests.root_module.addImport("hash_zig", pm);
+
+    const test_step = b.step("test", "Run library tests");
+    test_step.dependOn(&run_main_tests.step);
+    test_step.dependOn(&run_tests_tests.step);
+    // Optional Poseidon validation suite (only when Poseidon is enabled)
+    if (poseidon_enabled) {
+        const plonky3_validation_tests = b.addTest(.{
+            .root_source_file = .{ .cwd_relative = "src/poseidon_plonky3_validation.zig" },
+            .optimize = optimize,
+            .target = target,
+        });
+        plonky3_validation_tests.root_module.addOptions("build_options", options);
+        if (hashzig_module) |pm| plonky3_validation_tests.root_module.addImport("hash_zig", pm);
+        const run_plonky3_validation_tests = b.addRunArtifact(plonky3_validation_tests);
+        test_step.dependOn(&run_plonky3_validation_tests.step);
+    }
+
 }

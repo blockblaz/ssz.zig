@@ -1948,6 +1948,219 @@ test "Large capacity Bitlist overflow" {
     try expectError(error.Overflow, bitlist.append(true));
 }
 
+test "empty slice of dynamic items has zero serializedSize" {
+    const DynamicItem = []const u8;
+    const empty_slice: []const DynamicItem = &[_]DynamicItem{};
+
+    const size = try serializedSize([]const DynamicItem, empty_slice);
+    try expect(size == 0);
+
+    var list = ArrayList(u8).init(std.testing.allocator);
+    defer list.deinit();
+    try serialize([]const DynamicItem, empty_slice, &list);
+    try expect(list.items.len == 0);
+
+    try expect(size == list.items.len);
+}
+
+test "non-empty slice of dynamic items has correct serializedSize" {
+    const item1: []const u8 = "hello";
+    const item2: []const u8 = "world";
+    const items = [_][]const u8{ item1, item2 };
+    const slice: []const []const u8 = &items;
+
+    const size = try serializedSize([]const []const u8, slice);
+    try expect(size == 18);
+
+    var list = ArrayList(u8).init(std.testing.allocator);
+    defer list.deinit();
+    try serialize([]const []const u8, slice, &list);
+    try expect(list.items.len == 18);
+
+    try expect(size == list.items.len);
+}
+
+test "struct with empty dynamic list has correct serializedSize" {
+    const Inner = []const u8;
+    const TestStruct = struct {
+        fixed_field: u32,
+        dynamic_list: []const Inner,
+    };
+
+    const empty_list: []const Inner = &[_]Inner{};
+    const data = TestStruct{
+        .fixed_field = 42,
+        .dynamic_list = empty_list,
+    };
+
+    const size = try serializedSize(TestStruct, data);
+
+    var list = ArrayList(u8).init(std.testing.allocator);
+    defer list.deinit();
+    try serialize(TestStruct, data, &list);
+
+    try expect(size == list.items.len);
+}
+
+test "array of dynamic items has correct serializedSize with offsets" {
+    // Each dynamic element in an array needs a 4-byte offset in the serialization
+    const item1: []const u8 = "ab"; // 2 bytes
+    const item2: []const u8 = "cde"; // 3 bytes
+
+    const arr = [2][]const u8{ item1, item2 };
+
+    // Expected size: 2 offsets (4 bytes each) + 2 bytes + 3 bytes = 8 + 5 = 13
+    const size = try serializedSize([2][]const u8, arr);
+    try expect(size == 13);
+
+    var list = ArrayList(u8).init(std.testing.allocator);
+    defer list.deinit();
+    try serialize([2][]const u8, arr, &list);
+    try expect(list.items.len == 13);
+
+    // Verify serializedSize matches actual serialization length
+    try expect(size == list.items.len);
+}
+
+test "empty array of dynamic items has zero serializedSize" {
+    const arr: [0][]const u8 = .{};
+
+    const size = try serializedSize([0][]const u8, arr);
+    try expect(size == 0);
+
+    var list = ArrayList(u8).init(std.testing.allocator);
+    defer list.deinit();
+    try serialize([0][]const u8, arr, &list);
+    try expect(list.items.len == 0);
+
+    try expect(size == list.items.len);
+}
+
+test "nested dynamic list uses relative offsets" {
+    const InnerList = utils.List([]const u8, 10);
+    const OuterStruct = struct {
+        fixed_field: [32]u8, // 32 bytes
+        dynamic_list: InnerList, // variable
+    };
+
+    var inner_list = try InnerList.init(std.testing.allocator);
+    defer inner_list.deinit();
+
+    const item1: []const u8 = "hello";
+    const item2: []const u8 = "world";
+    try inner_list.append(item1);
+    try inner_list.append(item2);
+
+    const outer = OuterStruct{
+        .fixed_field = [_]u8{0xAB} ** 32,
+        .dynamic_list = inner_list,
+    };
+
+    var encoded = ArrayList(u8).init(std.testing.allocator);
+    defer encoded.deinit();
+    try serialize(OuterStruct, outer, &encoded);
+
+    const list_offset = std.mem.readInt(u32, encoded.items[32..36], .little);
+    try expect(list_offset == 36); // offset to dynamic_list from struct start
+
+    const first_item_offset = std.mem.readInt(u32, encoded.items[36..40], .little);
+    try expect(first_item_offset == 8); // 2 items * 4 bytes offset each
+
+    var decoded: OuterStruct = undefined;
+    try deserialize(OuterStruct, encoded.items, &decoded, std.testing.allocator);
+    defer decoded.dynamic_list.deinit();
+
+    try expect(decoded.dynamic_list.len() == 2);
+    const decoded_item1 = try decoded.dynamic_list.get(0);
+    const decoded_item2 = try decoded.dynamic_list.get(1);
+    try expect(std.mem.eql(u8, decoded_item1, "hello"));
+    try expect(std.mem.eql(u8, decoded_item2, "world"));
+}
+
+test "nested dynamic array uses relative offsets" {
+    const OuterStruct = struct {
+        fixed_field: [16]u8, // 16 bytes
+        dynamic_array: [2][]const u8, // variable
+    };
+
+    const item1: []const u8 = "foo";
+    const item2: []const u8 = "barbaz";
+
+    const outer = OuterStruct{
+        .fixed_field = [_]u8{0xCD} ** 16,
+        .dynamic_array = .{ item1, item2 },
+    };
+
+    var encoded = ArrayList(u8).init(std.testing.allocator);
+    defer encoded.deinit();
+    try serialize(OuterStruct, outer, &encoded);
+
+    const array_offset = std.mem.readInt(u32, encoded.items[16..20], .little);
+    try expect(array_offset == 20);
+
+    const first_item_offset = std.mem.readInt(u32, encoded.items[20..24], .little);
+    try expect(first_item_offset == 8); // 2 items * 4 bytes offset each
+
+    var decoded: OuterStruct = undefined;
+    try deserialize(OuterStruct, encoded.items, &decoded, std.testing.allocator);
+
+    try expect(std.mem.eql(u8, decoded.dynamic_array[0], "foo"));
+    try expect(std.mem.eql(u8, decoded.dynamic_array[1], "barbaz"));
+}
+
+test "deeply nested dynamic structures use relative offsets" {
+    const InnerList = utils.List([]const u8, 5);
+    const OuterList = utils.List(InnerList, 5);
+    const Container = struct {
+        prefix: [8]u8,
+        nested_lists: OuterList,
+    };
+
+    var inner1 = try InnerList.init(std.testing.allocator);
+    defer inner1.deinit();
+    try inner1.append("a");
+    try inner1.append("bb");
+
+    var inner2 = try InnerList.init(std.testing.allocator);
+    defer inner2.deinit();
+    try inner2.append("ccc");
+
+    var outer_list = try OuterList.init(std.testing.allocator);
+    defer outer_list.deinit();
+    try outer_list.append(inner1);
+    try outer_list.append(inner2);
+
+    const container = Container{
+        .prefix = [_]u8{0xFF} ** 8,
+        .nested_lists = outer_list,
+    };
+
+    var encoded = ArrayList(u8).init(std.testing.allocator);
+    defer encoded.deinit();
+    try serialize(Container, container, &encoded);
+
+    var decoded: Container = undefined;
+    try deserialize(Container, encoded.items, &decoded, std.testing.allocator);
+    defer {
+        for (decoded.nested_lists.constSlice()) |inner| {
+            var inner_copy = inner;
+            inner_copy.deinit();
+        }
+        decoded.nested_lists.deinit();
+    }
+
+    try expect(decoded.nested_lists.len() == 2);
+
+    const decoded_inner1 = try decoded.nested_lists.get(0);
+    try expect(decoded_inner1.len() == 2);
+    try expect(std.mem.eql(u8, try decoded_inner1.get(0), "a"));
+    try expect(std.mem.eql(u8, try decoded_inner1.get(1), "bb"));
+
+    const decoded_inner2 = try decoded.nested_lists.get(1);
+    try expect(decoded_inner2.len() == 1);
+    try expect(std.mem.eql(u8, try decoded_inner2.get(0), "ccc"));
+}
+
 test {
     _ = @import("beacon_tests.zig");
 }

@@ -95,8 +95,20 @@ pub fn List(comptime T: type, comptime N: usize) type {
             return .{ .inner = Inner.init(allocator) };
         }
 
-        pub fn eql(self: *const Self, other: *Self) bool {
-            return std.mem.eql(Self.Item, self.constSlice(), other.constSlice());
+        pub fn eql(self: *const Self, other: *const Self) bool {
+            if (self.len() != other.len()) return false;
+
+            const self_slice = self.constSlice();
+            const other_slice = other.constSlice();
+
+            // For struct/array types, use std.meta.eql for proper deep comparison
+            if (@typeInfo(Self.Item) == .@"struct" or @typeInfo(Self.Item) == .array) {
+                return std.meta.eql(self_slice, other_slice);
+            } else {
+                // For a slice of primitive types, it's faster to do a memory
+                // comparison.
+                return std.mem.eql(Self.Item, self_slice, other_slice);
+            }
         }
 
         pub fn deinit(self: *Self) void {
@@ -235,33 +247,35 @@ pub fn Bitlist(comptime N: usize) type {
             // Comprehensive validation (handles empty, trailing zero, size limits)
             try Self.validateBitlist(serialized);
 
-            // If validation passed but buffer is empty, we're done
-            if (serialized.len == 0) {
-                return;
-            }
-
             // FastSSZ-style capacity optimization: pre-allocate based on input size
             const byte_capacity = serialized.len;
             if (byte_capacity > 0) {
                 try out.inner.ensureTotalCapacity(byte_capacity);
             }
 
-            // Parse the bit structure (validation already confirmed it's valid)
-            const byte_len = serialized.len - 1;
-            var last_byte = serialized[byte_len];
-            var bit_len: usize = 8;
-            while (last_byte & @shlExact(@as(usize, 1), @truncate(bit_len)) == 0) : (bit_len -= 1) {}
+            // Find sentinel bit position using @clz (count leading zeros)
+            const last_byte = serialized[serialized.len - 1];
+            const msb_pos = @as(usize, 8) - @clz(last_byte);
+            const bit_length = 8 * (serialized.len - 1) + (msb_pos - 1);
 
-            // insert all full bytes
-            try out.*.inner.insertSlice(0, serialized[0..byte_len]);
-            out.*.length = 8 * byte_len;
+            // Calculate how many full bytes we need (excluding sentinel)
+            const full_bytes = bit_length / 8;
+            const remaining_bits = bit_length % 8;
 
-            // insert last bits
-            last_byte = serialized[byte_len];
-            for (0..bit_len) |_| {
-                try out.*.append(last_byte & 1 == 1);
-                last_byte >>= 1;
+            // Copy all full bytes
+            if (full_bytes > 0) {
+                try out.*.inner.appendSlice(serialized[0..full_bytes]);
             }
+
+            // Handle remaining bits in the last byte (if any)
+            if (remaining_bits > 0) {
+                // The last byte contains both data bits and the sentinel bit
+                // We need to mask out the sentinel bit and any bits after it
+                const mask = (@as(u8, 1) << @truncate(remaining_bits)) - 1;
+                try out.*.inner.append(serialized[full_bytes] & mask);
+            }
+
+            out.*.length = bit_length;
         }
 
         pub fn isFixedSizeObject() bool {
@@ -301,7 +315,7 @@ pub fn Bitlist(comptime N: usize) type {
             self.inner.deinit();
         }
 
-        pub fn eql(self: *const Self, other: *Self) bool {
+        pub fn eql(self: *const Self, other: *const Self) bool {
             return (self.length == other.length) and std.mem.eql(u8, self.inner.items, other.inner.items);
         }
 
@@ -344,7 +358,9 @@ pub fn Bitlist(comptime N: usize) type {
         /// Validates that the bitlist is correctly formed
         pub fn validateBitlist(buf: []const u8) !void {
             const byte_len = buf.len;
-            if (byte_len == 0) return;
+
+            // Empty buffer is invalid, at least sentinel bit should exist
+            if (byte_len == 0) return error.InvalidBitlistEncoding;
 
             // Maximum possible bytes in a bitlist with provided bitlimit.
             const max_bytes = ((N + 7 + 1) >> 3);

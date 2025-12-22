@@ -80,5 +80,4 @@ pub fn build(b: *Builder) void {
         const run_plonky3_validation_tests = b.addRunArtifact(plonky3_validation_tests);
         test_step.dependOn(&run_plonky3_validation_tests.step);
     }
-
 }

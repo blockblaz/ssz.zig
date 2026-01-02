@@ -52,6 +52,10 @@ pub fn serializedSize(comptime T: type, data: T) !usize {
         .bool => @sizeOf(T),
         .array => size: {
             var size: usize = 0;
+            const is_child_fixed = try isFixedSizeObject(info.array.child);
+            if (!is_child_fixed) {
+                size += 4 * data.len;
+            }
             for (0..data.len) |i| {
                 size += try serializedSize(info.array.child, data[i]);
             }
@@ -59,8 +63,11 @@ pub fn serializedSize(comptime T: type, data: T) !usize {
         },
         .pointer => switch (info.pointer.size) {
             .slice => size: {
-                // 4 byes for encoding size
-                var size: usize = if (try isFixedSizeObject(info.pointer.child)) 0 else 4;
+                var size: usize = 0;
+                const is_child_fixed = try isFixedSizeObject(info.pointer.child);
+                if (!is_child_fixed) {
+                    size += 4 * data.len;
+                }
                 for (0..data.len) |i| {
                     size += try serializedSize(info.pointer.child, data[i]);
                 }
@@ -153,7 +160,8 @@ pub fn serialize(comptime T: type, data: T, l: *ArrayList(u8)) !void {
                 } else {
                     // Size of the buffer before anything is
                     // written to it.
-                    var start = l.items.len;
+                    const base = l.items.len;
+                    var start = base;
 
                     // Reserve the space for the offset
                     for (data) |_| {
@@ -162,8 +170,10 @@ pub fn serialize(comptime T: type, data: T, l: *ArrayList(u8)) !void {
 
                     // Now serialize one item after the other
                     // and update the offset list with its location.
+                    // The offset is relative to the start of this array's data.
                     for (data) |item| {
-                        std.mem.writeInt(u32, l.items[start .. start + 4][0..4], @truncate(l.items.len), std.builtin.Endian.little);
+                        const relative_offset = l.items.len - base;
+                        std.mem.writeInt(u32, l.items[start .. start + 4][0..4], @truncate(relative_offset), std.builtin.Endian.little);
                         _ = try serialize(array.child, item, l);
                         start += 4;
                     }
@@ -201,7 +211,8 @@ pub fn serialize(comptime T: type, data: T, l: *ArrayList(u8)) !void {
                         } else {
                             // Size of the buffer before anything is
                             // written to it.
-                            var start = l.items.len;
+                            const base = l.items.len;
+                            var start = base;
 
                             // Reserve the space for the offset
                             for (data) |_| {
@@ -210,8 +221,10 @@ pub fn serialize(comptime T: type, data: T, l: *ArrayList(u8)) !void {
 
                             // Now serialize one item after the other
                             // and update the offset list with its location.
+                            // The offset is relative to the start of this slice's data.
                             for (data) |item| {
-                                std.mem.writeInt(u32, l.items[start .. start + 4][0..4], @truncate(l.items.len), std.builtin.Endian.little);
+                                const relative_offset = l.items.len - base;
+                                std.mem.writeInt(u32, l.items[start .. start + 4][0..4], @truncate(relative_offset), std.builtin.Endian.little);
                                 _ = try serialize(pointer.child, item, l);
                                 start += 4;
                             }

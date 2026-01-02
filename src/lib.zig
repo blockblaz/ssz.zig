@@ -53,10 +53,10 @@ pub fn serializedSize(comptime T: type, data: T) !usize {
         .array => size: {
             var size: usize = 0;
             const is_child_fixed = try isFixedSizeObject(info.array.child);
+            if (!is_child_fixed) {
+                size += 4 * data.len;
+            }
             for (0..data.len) |i| {
-                if (!is_child_fixed) {
-                    size += 4;
-                }
                 size += try serializedSize(info.array.child, data[i]);
             }
             break :size size;
@@ -65,10 +65,10 @@ pub fn serializedSize(comptime T: type, data: T) !usize {
             .slice => size: {
                 var size: usize = 0;
                 const is_child_fixed = try isFixedSizeObject(info.pointer.child);
+                if (!is_child_fixed) {
+                    size += 4 * data.len;
+                }
                 for (0..data.len) |i| {
-                    if (!is_child_fixed) {
-                        size += 4;
-                    }
                     size += try serializedSize(info.pointer.child, data[i]);
                 }
                 break :size size;
@@ -170,7 +170,7 @@ pub fn serialize(comptime T: type, data: T, l: *ArrayList(u8)) !void {
 
                     // Now serialize one item after the other
                     // and update the offset list with its location.
-                    // The offset should be relative to the start of this array's data, not absolute.
+                    // The offset is relative to the start of this array's data.
                     for (data) |item| {
                         const relative_offset = l.items.len - base;
                         std.mem.writeInt(u32, l.items[start .. start + 4][0..4], @truncate(relative_offset), std.builtin.Endian.little);
@@ -221,7 +221,7 @@ pub fn serialize(comptime T: type, data: T, l: *ArrayList(u8)) !void {
 
                             // Now serialize one item after the other
                             // and update the offset list with its location.
-                            // The offset should be relative to the start of this slice's data, not absolute.
+                            // The offset is relative to the start of this slice's data.
                             for (data) |item| {
                                 const relative_offset = l.items.len - base;
                                 std.mem.writeInt(u32, l.items[start .. start + 4][0..4], @truncate(relative_offset), std.builtin.Endian.little);

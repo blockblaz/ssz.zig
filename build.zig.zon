@@ -3,6 +3,5 @@
     .fingerprint = 0x1d34bd0ceb1dfc2d,
     .version = "0.0.9",
     .paths = .{""},
-    .dependencies = .{
-    },
+    .dependencies = .{},
 }

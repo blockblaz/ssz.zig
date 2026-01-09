@@ -532,18 +532,18 @@ const e_bits = bytesToBits(16, e_bytes);
 test "calculate the root hash of a boolean" {
     var expected = [_]u8{1} ++ [_]u8{0} ** 31;
     var hashed: [32]u8 = undefined;
-    try hashTreeRoot(Sha256,bool, true, &hashed, std.testing.allocator);
+    try hashTreeRoot(Sha256, bool, true, &hashed, std.testing.allocator);
     try expect(std.mem.eql(u8, hashed[0..], expected[0..]));
 
     expected = hashes_of_zero[0];
-    try hashTreeRoot(Sha256,bool, false, &hashed, std.testing.allocator);
+    try hashTreeRoot(Sha256, bool, false, &hashed, std.testing.allocator);
     try expect(std.mem.eql(u8, hashed[0..], expected[0..]));
 }
 
 test "calculate root hash of an array of two Bitvector[128]" {
     const deserialized: [2][128]bool = [2][128]bool{ a_bits, b_bits };
     var hashed: [32]u8 = undefined;
-    try hashTreeRoot(Sha256,@TypeOf(deserialized), deserialized, &hashed, std.testing.allocator);
+    try hashTreeRoot(Sha256, @TypeOf(deserialized), deserialized, &hashed, std.testing.allocator);
 
     var expected: [32]u8 = undefined;
     const expected_preimage = a_bytes ++ empty_bytes ++ b_bytes ++ empty_bytes;
@@ -555,14 +555,14 @@ test "calculate root hash of an array of two Bitvector[128]" {
 test "calculate the root hash of an array of integers" {
     var expected = [_]u8{ 0xef, 0xbe, 0xad, 0xde, 0xfe, 0xca, 0xfe, 0xca } ++ [_]u8{0} ** 24;
     var hashed: [32]u8 = undefined;
-    try hashTreeRoot(Sha256,[2]u32, [_]u32{ 0xdeadbeef, 0xcafecafe }, &hashed, std.testing.allocator);
+    try hashTreeRoot(Sha256, [2]u32, [_]u32{ 0xdeadbeef, 0xcafecafe }, &hashed, std.testing.allocator);
     try expect(std.mem.eql(u8, hashed[0..], expected[0..]));
 }
 
 test "calculate root hash of an array of three Bitvector[128]" {
     const deserialized: [3][128]bool = [3][128]bool{ a_bits, b_bits, c_bits };
     var hashed: [32]u8 = undefined;
-    try hashTreeRoot(Sha256,@TypeOf(deserialized), deserialized, &hashed, std.testing.allocator);
+    try hashTreeRoot(Sha256, @TypeOf(deserialized), deserialized, &hashed, std.testing.allocator);
 
     var left: [32]u8 = undefined;
     var expected: [32]u8 = undefined;
@@ -581,7 +581,7 @@ test "calculate root hash of an array of three Bitvector[128]" {
 test "calculate the root hash of an array of five Bitvector[128]" {
     const deserialized = [5][128]bool{ a_bits, b_bits, c_bits, d_bits, e_bits };
     var hashed: [32]u8 = undefined;
-    try hashTreeRoot(Sha256,@TypeOf(deserialized), deserialized, &hashed, std.testing.allocator);
+    try hashTreeRoot(Sha256, @TypeOf(deserialized), deserialized, &hashed, std.testing.allocator);
 
     var internal_nodes: [64]u8 = undefined;
     var left: [32]u8 = undefined;
@@ -625,7 +625,7 @@ test "calculate the root hash of a structure" {
     };
     var expected: [32]u8 = undefined;
     _ = try std.fmt.hexToBytes(expected[0..], "58316a908701d3660123f0b8cb7839abdd961f71d92993d34e4f480fbec687d9");
-    try hashTreeRoot(Sha256,Fork, fork, &hashed, std.testing.allocator);
+    try hashTreeRoot(Sha256, Fork, fork, &hashed, std.testing.allocator);
     try expect(std.mem.eql(u8, hashed[0..], expected[0..]));
 }
 
@@ -638,12 +638,12 @@ test "calculate the root hash of an Optional" {
 
     _ = try std.fmt.hexToBytes(payload[0..], "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000");
     Sha256.hash(payload[0..], expected[0..], Sha256.Options{});
-    try hashTreeRoot(Sha256,?u32, v, &hashed, std.testing.allocator);
+    try hashTreeRoot(Sha256, ?u32, v, &hashed, std.testing.allocator);
     try expect(std.mem.eql(u8, hashed[0..], expected[0..]));
 
     _ = try std.fmt.hexToBytes(payload[0..], "efbeadde000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000");
     Sha256.hash(payload[0..], expected[0..], Sha256.Options{});
-    try hashTreeRoot(Sha256,?u32, u, &hashed, std.testing.allocator);
+    try hashTreeRoot(Sha256, ?u32, u, &hashed, std.testing.allocator);
     try expect(std.mem.eql(u8, hashed[0..], expected[0..]));
 }
 
@@ -657,13 +657,13 @@ test "calculate the root hash of an union" {
     _ = try std.fmt.hexToBytes(payload[0..], "d2040000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000");
     var exp1: [32]u8 = undefined;
     Sha256.hash(payload[0..], exp1[0..], Sha256.Options{});
-    try hashTreeRoot(Sha256,Payload, Payload{ .int = 1234 }, &out, std.testing.allocator);
+    try hashTreeRoot(Sha256, Payload, Payload{ .int = 1234 }, &out, std.testing.allocator);
     try expect(std.mem.eql(u8, out[0..], exp1[0..]));
 
     var exp2: [32]u8 = undefined;
     _ = try std.fmt.hexToBytes(payload[0..], "01000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000");
     Sha256.hash(payload[0..], exp2[0..], Sha256.Options{});
-    try hashTreeRoot(Sha256,Payload, Payload{ .boolean = true }, &out, std.testing.allocator);
+    try hashTreeRoot(Sha256, Payload, Payload{ .boolean = true }, &out, std.testing.allocator);
     try expect(std.mem.eql(u8, out[0..], exp2[0..]));
 }
 
@@ -927,7 +927,8 @@ test "slice hashtree root composite type" {
     var roots_list = [_]Root{test_root};
 
     var hash_root: [32]u8 = undefined;
-    try hashTreeRoot(Sha256,
+    try hashTreeRoot(
+        Sha256,
         RootsList,
         &roots_list,
         &hash_root,
@@ -944,7 +945,8 @@ test "slice hashtree root simple type" {
     var test_root = [_]u8{23} ** 33;
 
     var hash_root: [32]u8 = undefined;
-    try hashTreeRoot(Sha256,
+    try hashTreeRoot(
+        Sha256,
         DynamicRoot,
         &test_root,
         &hash_root,
@@ -970,8 +972,8 @@ test "List tree root calculation" {
     var empty_hash: [32]u8 = undefined;
     var filled_hash: [32]u8 = undefined;
 
-    try hashTreeRoot(Sha256,ListU64, empty_list, &empty_hash, std.testing.allocator);
-    try hashTreeRoot(Sha256,ListU64, list_with_items, &filled_hash, std.testing.allocator);
+    try hashTreeRoot(Sha256, ListU64, empty_list, &empty_hash, std.testing.allocator);
+    try hashTreeRoot(Sha256, ListU64, list_with_items, &filled_hash, std.testing.allocator);
     try expect(std.mem.eql(u8, &filled_hash, &list_with_items_expected));
 
     try expect(!std.mem.eql(u8, &empty_hash, &filled_hash));
@@ -983,7 +985,7 @@ test "List tree root calculation" {
     try same_content_list.append(456);
 
     var same_content_hash: [32]u8 = undefined;
-    try hashTreeRoot(Sha256,ListU64, same_content_list, &same_content_hash, std.testing.allocator);
+    try hashTreeRoot(Sha256, ListU64, same_content_list, &same_content_hash, std.testing.allocator);
 
     try expect(std.mem.eql(u8, &filled_hash, &same_content_hash));
 }
@@ -1003,8 +1005,8 @@ test "Bitlist tree root calculation" {
     var empty_hash: [32]u8 = undefined;
     var filled_hash: [32]u8 = undefined;
 
-    try hashTreeRoot(Sha256,TestBitlist, empty_bitlist, &empty_hash, std.testing.allocator);
-    try hashTreeRoot(Sha256,TestBitlist, filled_bitlist, &filled_hash, std.testing.allocator);
+    try hashTreeRoot(Sha256, TestBitlist, empty_bitlist, &empty_hash, std.testing.allocator);
+    try hashTreeRoot(Sha256, TestBitlist, filled_bitlist, &filled_hash, std.testing.allocator);
 
     try expect(!std.mem.eql(u8, &empty_hash, &filled_hash));
 
@@ -1016,7 +1018,7 @@ test "Bitlist tree root calculation" {
     try same_content_bitlist.append(true);
 
     var same_content_hash: [32]u8 = undefined;
-    try hashTreeRoot(Sha256,TestBitlist, same_content_bitlist, &same_content_hash, std.testing.allocator);
+    try hashTreeRoot(Sha256, TestBitlist, same_content_bitlist, &same_content_hash, std.testing.allocator);
 
     try expect(std.mem.eql(u8, &filled_hash, &same_content_hash));
 }
@@ -1030,7 +1032,7 @@ test "List of composite types tree root" {
     try pastry_list.append(Pastry{ .name = "muffin", .weight = 30 });
 
     var hash1: [32]u8 = undefined;
-    try hashTreeRoot(Sha256,ListOfPastry, pastry_list, &hash1, std.testing.allocator);
+    try hashTreeRoot(Sha256, ListOfPastry, pastry_list, &hash1, std.testing.allocator);
 
     var pastry_list2 = try ListOfPastry.init(std.testing.allocator);
     defer pastry_list2.deinit();
@@ -1038,13 +1040,13 @@ test "List of composite types tree root" {
     try pastry_list2.append(Pastry{ .name = "muffin", .weight = 30 });
 
     var hash2: [32]u8 = undefined;
-    try hashTreeRoot(Sha256,ListOfPastry, pastry_list2, &hash2, std.testing.allocator);
+    try hashTreeRoot(Sha256, ListOfPastry, pastry_list2, &hash2, std.testing.allocator);
 
     try expect(std.mem.eql(u8, &hash1, &hash2));
 
     try pastry_list2.append(Pastry{ .name = "bagel", .weight = 25 });
     var hash3: [32]u8 = undefined;
-    try hashTreeRoot(Sha256,ListOfPastry, pastry_list2, &hash3, std.testing.allocator);
+    try hashTreeRoot(Sha256, ListOfPastry, pastry_list2, &hash3, std.testing.allocator);
 
     try expect(!std.mem.eql(u8, &hash1, &hash3));
 }
@@ -1281,7 +1283,7 @@ test "Empty List hash tree root" {
     defer empty_list.deinit();
 
     var hash: [32]u8 = undefined;
-    try hashTreeRoot(Sha256,ListU32, empty_list, &hash, std.testing.allocator);
+    try hashTreeRoot(Sha256, ListU32, empty_list, &hash, std.testing.allocator);
 
     // Updated to correct SSZ-compliant hash that uses max capacity for merkleization
     const zig_expected = [_]u8{
@@ -1299,7 +1301,7 @@ test "Empty BitList(<=256) hash tree root" {
     defer empty_list.deinit();
 
     var hash: [32]u8 = undefined;
-    try hashTreeRoot(Sha256,BitListLen100, empty_list, &hash, std.testing.allocator);
+    try hashTreeRoot(Sha256, BitListLen100, empty_list, &hash, std.testing.allocator);
 
     const zig_expected = [_]u8{
         0xf5, 0xa5, 0xfd, 0x42, 0xd1, 0x6a, 0x20, 0x30,
@@ -1316,7 +1318,7 @@ test "Empty BitList (>256) hash tree root" {
     defer empty_list.deinit();
 
     var hash: [32]u8 = undefined;
-    try hashTreeRoot(Sha256,BitListLen100, empty_list, &hash, std.testing.allocator);
+    try hashTreeRoot(Sha256, BitListLen100, empty_list, &hash, std.testing.allocator);
 
     const zig_expected = [_]u8{
         0x79, 0x29, 0x30, 0xbb, 0xd5, 0xba, 0xac, 0x43,
@@ -1343,7 +1345,7 @@ test "List at maximum capacity" {
 
     // Test hash tree root at capacity
     var hash: [32]u8 = undefined;
-    try hashTreeRoot(Sha256,ListU8, full_list, &hash, std.testing.allocator);
+    try hashTreeRoot(Sha256, ListU8, full_list, &hash, std.testing.allocator);
 
     // Python reference: List[uint8, 4] with [1,2,3,4]
     const expected = [_]u8{
@@ -1359,7 +1361,7 @@ test "Array hash tree root" {
     const data: [4]u32 = .{ 1, 2, 3, 4 };
 
     var hash: [32]u8 = undefined;
-    try hashTreeRoot(Sha256,[4]u32, data, &hash, std.testing.allocator);
+    try hashTreeRoot(Sha256, [4]u32, data, &hash, std.testing.allocator);
 
     // Python reference: Vector[uint32, 4] with [1,2,3,4]
     // For basic types packed in one chunk, hash is the serialized data
@@ -1395,10 +1397,9 @@ test "Large Bitvector serialization and hash" {
     try expect(list.items[32] & 0x01 == 0x01); // bit 256 -> LSB of byte 32
     try expect(list.items[63] & 0x80 == 0x80); // bit 511 -> MSB of byte 63
 
-
     // Test hash tree root
     var hash: [32]u8 = undefined;
-    try hashTreeRoot(Sha256,LargeBitvec, data, &hash, std.testing.allocator);
+    try hashTreeRoot(Sha256, LargeBitvec, data, &hash, std.testing.allocator);
     const expected = [_]u8{
         0x1d, 0x83, 0x09, 0x11, 0x4a, 0xfe, 0xf7, 0x14,
         0x89, 0xbe, 0x68, 0xd4, 0x5e, 0x18, 0xc3, 0x39,
@@ -1419,7 +1420,7 @@ test "Bitlist edge cases" {
     }
 
     var hash1: [32]u8 = undefined;
-    try hashTreeRoot(Sha256,TestBitlist, all_false, &hash1, std.testing.allocator);
+    try hashTreeRoot(Sha256, TestBitlist, all_false, &hash1, std.testing.allocator);
 
     const expected_false = [_]u8{
         0x02, 0xc8, 0xc1, 0x5f, 0xed, 0x3f, 0x1b, 0x86,
@@ -1437,7 +1438,7 @@ test "Bitlist edge cases" {
     }
 
     var hash2: [32]u8 = undefined;
-    try hashTreeRoot(Sha256,TestBitlist, all_true, &hash2, std.testing.allocator);
+    try hashTreeRoot(Sha256, TestBitlist, all_true, &hash2, std.testing.allocator);
 
     // Python reference: Bitlist[100] with 50 true bits
     const expected_true = [_]u8{
@@ -1460,7 +1461,7 @@ test "Bitlist trailing zeros optimization" {
     }
 
     var hash1: [32]u8 = undefined;
-    try hashTreeRoot(Sha256,TestBitlist, eight_false, &hash1, std.testing.allocator);
+    try hashTreeRoot(Sha256, TestBitlist, eight_false, &hash1, std.testing.allocator);
 
     // Expected hash for 8 false bits in Bitlist[256]
     // This should keep one zero byte and not remove all then add back a chunk
@@ -1484,7 +1485,7 @@ test "Bitlist trailing zeros optimization" {
     }
 
     var hash2: [32]u8 = undefined;
-    try hashTreeRoot(Sha256,TestBitlist, pattern, &hash2, std.testing.allocator);
+    try hashTreeRoot(Sha256, TestBitlist, pattern, &hash2, std.testing.allocator);
 
     // Expected hash for [T,F,T,F...F] (16 bits total)
     // First byte is 0x05, second byte is 0x00
@@ -1502,7 +1503,7 @@ test "uint256 hash tree root" {
     const data: u256 = 0x0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF;
 
     var hash: [32]u8 = undefined;
-    try hashTreeRoot(Sha256,u256, data, &hash, std.testing.allocator);
+    try hashTreeRoot(Sha256, u256, data, &hash, std.testing.allocator);
     const expected = [_]u8{
         0xEF, 0xCD, 0xAB, 0x89, 0x67, 0x45, 0x23, 0x01,
         0xEF, 0xCD, 0xAB, 0x89, 0x67, 0x45, 0x23, 0x01,
@@ -1519,7 +1520,7 @@ test "Single element List" {
     try single.append(42);
 
     var hash: [32]u8 = undefined;
-    try hashTreeRoot(Sha256,ListU64, single, &hash, std.testing.allocator);
+    try hashTreeRoot(Sha256, ListU64, single, &hash, std.testing.allocator);
 
     const expected = [_]u8{
         0x54, 0xd7, 0x76, 0x7c, 0xc1, 0xdd, 0xd2, 0xf6,
@@ -1549,7 +1550,7 @@ test "Nested structure hash tree root" {
     };
 
     var hash: [32]u8 = undefined;
-    try hashTreeRoot(Sha256,Outer, data, &hash, std.testing.allocator);
+    try hashTreeRoot(Sha256, Outer, data, &hash, std.testing.allocator);
 
     const expected = [_]u8{
         0x4e, 0xbe, 0x9c, 0x7f, 0x41, 0x63, 0xd9, 0x34,
@@ -1587,7 +1588,7 @@ test "Zero-length array" {
     try expect(list.items.len == 0);
 
     var hash: [32]u8 = undefined;
-    try hashTreeRoot(Sha256,[0]u32, empty, &hash, std.testing.allocator);
+    try hashTreeRoot(Sha256, [0]u32, empty, &hash, std.testing.allocator);
     // Should be the zero chunk
     try expect(std.mem.eql(u8, &hash, &([_]u8{0} ** 32)));
 }

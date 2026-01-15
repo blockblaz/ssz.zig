@@ -15,7 +15,7 @@ const chunk = [BYTES_PER_CHUNK]u8;
 const zero_chunk: chunk = [_]u8{0} ** BYTES_PER_CHUNK;
 
 /// Implements the SSZ `List[N]` container.
-pub fn List(comptime T: type, comptime N: usize) type {
+pub fn List(T: type, comptime N: usize) type {
     // Compile-time check: List[bool, N] is not allowed, use Bitlist[N] instead
     if (T == bool) {
         @compileError("List[bool, N] is not supported. Use Bitlist(" ++ std.fmt.comptimePrint("{}", .{N}) ++ ") instead for boolean lists.");
@@ -153,7 +153,7 @@ pub fn List(comptime T: type, comptime N: usize) type {
             return lib.serializedSize(@TypeOf(inner_slice), inner_slice);
         }
 
-        pub fn hashTreeRoot(self: *const Self, comptime Hasher: type, out: *[32]u8, allctr: Allocator) !void {
+        pub fn hashTreeRoot(self: *const Self, Hasher: type, out: *[32]u8, allctr: Allocator) !void {
             const items = self.constSlice();
 
             switch (@typeInfo(Item)) {
@@ -323,7 +323,7 @@ pub fn Bitlist(comptime N: usize) type {
             return (self.length + 7 + 1) / 8;
         }
 
-        pub fn hashTreeRoot(self: *const Self, comptime Hasher: type, out: *[32]u8, allctr: Allocator) !void {
+        pub fn hashTreeRoot(self: *const Self, Hasher: type, out: *[32]u8, allctr: Allocator) !void {
             const bit_length = self.length;
 
             var bitfield_bytes = ArrayList(u8).init(allctr);

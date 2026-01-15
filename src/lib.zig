@@ -7,11 +7,12 @@ pub const zeros = @import("./zeros.zig");
 const ArrayList = std.ArrayList;
 const builtin = std.builtin;
 const Allocator = std.mem.Allocator;
+const Sha256 = std.crypto.hash.sha2.Sha256;
 
 /// Number of bytes per chunk.
 const BYTES_PER_CHUNK = 32;
 
-pub fn serializedFixedSize(comptime T: type) !usize {
+pub fn serializedFixedSize(T: type) !usize {
     const info = @typeInfo(T);
     return switch (info) {
         .int => @sizeOf(T),
@@ -38,7 +39,7 @@ pub fn serializedFixedSize(comptime T: type) !usize {
 // Determine the serialized size of an object so that
 // the code serializing of variable-size objects can
 // determine the offset to the next object.
-pub fn serializedSize(comptime T: type, data: T) !usize {
+pub fn serializedSize(T: type, data: T) !usize {
     // Check for custom serializedSize method first for List types
     if (comptime std.meta.hasFn(T, "serializedSize")) {
         return data.serializedSize();
@@ -94,7 +95,7 @@ pub fn serializedSize(comptime T: type, data: T) !usize {
 }
 
 /// Returns true if an object is of fixed size
-pub fn isFixedSizeObject(comptime T: type) !bool {
+pub fn isFixedSizeObject(T: type) !bool {
     if (comptime std.meta.hasFn(T, "isFixedSizeObject")) {
         return T.isFixedSizeObject();
     }
@@ -120,7 +121,7 @@ pub fn isFixedSizeObject(comptime T: type) !bool {
 
 /// Provides the generic serialization of any `data` var to SSZ. The
 /// serialization is written to the `ArrayList` `l`.
-pub fn serialize(comptime T: type, data: T, l: *ArrayList(u8)) !void {
+pub fn serialize(T: type, data: T, l: *ArrayList(u8)) !void {
     // shortcut if the type implements its own encode method
     if (comptime std.meta.hasFn(T, "sszEncode")) {
         return data.sszEncode(l);
@@ -314,7 +315,7 @@ pub fn serialize(comptime T: type, data: T, l: *ArrayList(u8)) !void {
 /// Takes a byte array containing the serialized payload of type `T` (with
 /// possible trailing data) and deserializes it into the `T` object pointed
 /// at by `out`.
-pub fn deserialize(comptime T: type, serialized: []const u8, out: *T, allocator: ?std.mem.Allocator) !void {
+pub fn deserialize(T: type, serialized: []const u8, out: *T, allocator: ?std.mem.Allocator) !void {
     // shortcut if the type implements its own decode method
     if (comptime std.meta.hasFn(T, "sszDecode")) {
         return T.sszDecode(serialized, out, allocator);
@@ -515,7 +516,7 @@ pub fn deserialize(comptime T: type, serialized: []const u8, out: *T, allocator:
     }
 }
 
-pub fn mixInLength2(comptime Hasher: type, root: [32]u8, length: usize, out: *[32]u8) void {
+pub fn mixInLength2(Hasher: type, root: [32]u8, length: usize, out: *[32]u8) void {
     var hasher = Hasher.init(Hasher.Options{});
     hasher.update(root[0..]);
 
@@ -525,7 +526,7 @@ pub fn mixInLength2(comptime Hasher: type, root: [32]u8, length: usize, out: *[3
     hasher.final(out[0..]);
 }
 
-fn mixInLength(comptime Hasher: type, root: [32]u8, length: [32]u8, out: *[32]u8) void {
+fn mixInLength(Hasher: type, root: [32]u8, length: [32]u8, out: *[32]u8) void {
     var hasher = Hasher.init(Hasher.Options{});
     hasher.update(root[0..]);
     hasher.update(length[0..]);
@@ -533,7 +534,6 @@ fn mixInLength(comptime Hasher: type, root: [32]u8, length: [32]u8, out: *[32]u8
 }
 
 test "mixInLength" {
-    const Sha256 = std.crypto.hash.sha2.Sha256;
     var root: [32]u8 = undefined;
     var length: [32]u8 = undefined;
     var expected: [32]u8 = undefined;
@@ -546,7 +546,7 @@ test "mixInLength" {
     try std.testing.expect(std.mem.eql(u8, mixin[0..], expected[0..]));
 }
 
-fn mixInSelector(comptime Hasher: type, root: [32]u8, comptime selector: usize, out: *[32]u8) void {
+fn mixInSelector(Hasher: type, root: [32]u8, comptime selector: usize, out: *[32]u8) void {
     var hasher = Hasher.init(Hasher.Options{});
     hasher.update(root[0..]);
     var tmp = [_]u8{0} ** 32;
@@ -556,7 +556,6 @@ fn mixInSelector(comptime Hasher: type, root: [32]u8, comptime selector: usize, 
 }
 
 test "mixInSelector" {
-    const Sha256 = std.crypto.hash.sha2.Sha256;
     var root: [32]u8 = undefined;
     var expected: [32]u8 = undefined;
     var mixin: [32]u8 = undefined;
@@ -569,7 +568,7 @@ test "mixInSelector" {
 
 /// Calculates the number of leaves needed for the merkelization
 /// of this type.
-pub fn chunkCount(comptime T: type) usize {
+pub fn chunkCount(T: type) usize {
     const info = @typeInfo(T);
     switch (info) {
         .int, .bool => return 1,
@@ -591,7 +590,7 @@ pub fn chunkCount(comptime T: type) usize {
 const chunk = [BYTES_PER_CHUNK]u8;
 const zero_chunk: chunk = [_]u8{0} ** BYTES_PER_CHUNK;
 
-pub fn pack(comptime T: type, values: T, l: *ArrayList(u8)) ![]chunk {
+pub fn pack(T: type, values: T, l: *ArrayList(u8)) ![]chunk {
     try serialize(T, values, l);
     const padding_size = (BYTES_PER_CHUNK - l.items.len % BYTES_PER_CHUNK) % BYTES_PER_CHUNK;
     _ = try l.writer().write(zero_chunk[0..padding_size]);
@@ -636,9 +635,9 @@ test "pack string" {
 }
 
 // merkleize recursively calculates the root hash of a Merkle tree.
-pub fn merkleize(comptime Hasher: type, chunks: []chunk, limit: ?usize, out: *[32]u8) anyerror!void {
+pub fn merkleize(Hasher: type, chunks: []chunk, limit: ?usize, out: *[32]u8) anyerror!void {
     // Generate zero hashes for this hasher type at comptime
-    const zero_hashes = comptime zeros.buildZeroHashes(Hasher, 32, 256);
+    const hashes_of_zero = comptime zeros.buildHashesOfZero(Hasher, 32, 256);
 
     // Calculate the number of chunks to be padded, check the limit
     if (limit != null and chunks.len > limit.?) {
@@ -649,8 +648,8 @@ pub fn merkleize(comptime Hasher: type, chunks: []chunk, limit: ?usize, out: *[3
 
     // Perform the merkelization
     switch (size) {
-        0 => std.mem.copyForwards(u8, out.*[0..], zero_hashes[0][0..]),
-        1 => std.mem.copyForwards(u8, out.*[0..], (if (chunks.len > 0) chunks[0] else zero_hashes[0])[0..]),
+        0 => std.mem.copyForwards(u8, out.*[0..], hashes_of_zero[0][0..]),
+        1 => std.mem.copyForwards(u8, out.*[0..], (if (chunks.len > 0) chunks[0] else hashes_of_zero[0])[0..]),
         else => {
             // Merkleize the left side. If the number of chunks
             // isn't enough to fill the entire width, complete
@@ -672,7 +671,7 @@ pub fn merkleize(comptime Hasher: type, chunks: []chunk, limit: ?usize, out: *[3
                 // For a subtree of size/2 leaves, we need the zero hash at depth log2(size/2)
                 const subtree_size = size / 2;
                 const depth = std.math.log2_int(usize, subtree_size);
-                digest.update(zero_hashes[depth][0..]);
+                digest.update(hashes_of_zero[depth][0..]);
             }
             digest.final(out);
         },
@@ -680,7 +679,6 @@ pub fn merkleize(comptime Hasher: type, chunks: []chunk, limit: ?usize, out: *[3
 }
 
 test "merkleize an empty slice" {
-    const Sha256 = std.crypto.hash.sha2.Sha256;
     var list = ArrayList(u8).init(std.testing.allocator);
     defer list.deinit();
     const chunks = &[0][32]u8{};
@@ -690,7 +688,6 @@ test "merkleize an empty slice" {
 }
 
 test "merkleize a string" {
-    const Sha256 = std.crypto.hash.sha2.Sha256;
     var list = ArrayList(u8).init(std.testing.allocator);
     defer list.deinit();
     const chunks = try pack([]const u8, "a" ** 100, &list);
@@ -719,7 +716,6 @@ test "merkleize a string" {
 }
 
 test "merkleize a boolean" {
-    const Sha256 = std.crypto.hash.sha2.Sha256;
     var list = ArrayList(u8).init(std.testing.allocator);
     defer list.deinit();
 
@@ -768,7 +764,7 @@ fn packBits(bits: []const bool, l: *ArrayList(u8)) ![]chunk {
     return std.mem.bytesAsSlice(chunk, l.items);
 }
 
-pub fn hashTreeRoot(comptime Hasher: type, comptime T: type, value: T, out: *[32]u8, allctr: Allocator) !void {
+pub fn hashTreeRoot(Hasher: type, T: type, value: T, out: *[32]u8, allctr: Allocator) !void {
     // Check if type has its own hashTreeRoot method at compile time
     if (comptime std.meta.hasFn(T, "hashTreeRoot")) {
         return value.hashTreeRoot(Hasher, out, allctr);

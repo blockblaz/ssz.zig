@@ -1,4 +1,3 @@
-const std = @import("std");
 const Builder = @import("std").Build;
 
 pub fn build(b: *Builder) void {

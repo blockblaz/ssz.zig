@@ -4,7 +4,7 @@ const std = @import("std");
 /// Generic function to build zero hashes for any hash function
 /// HashType should be a hash type like std.crypto.hash.sha2.Sha256
 /// digest_length is the output size of the hash in bytes
-pub fn buildZeroHashes(comptime HashType: type, comptime digest_length: usize, comptime depth: usize) [depth][digest_length]u8 {
+pub fn buildHashesOfZero(comptime HashType: type, comptime digest_length: usize, comptime depth: usize) [depth][digest_length]u8 {
     @setEvalBranchQuota(10000000);
     var ret: [depth][digest_length]u8 = undefined;
 
@@ -26,4 +26,4 @@ pub fn buildZeroHashes(comptime HashType: type, comptime digest_length: usize, c
 }
 
 // SHA256 zero hashes (the default for SSZ)
-pub const hashes_of_zero = buildZeroHashes(std.crypto.hash.sha2.Sha256, 32, 256);
+pub const hashes_of_zero = buildHashesOfZero(std.crypto.hash.sha2.Sha256, 32, 256);

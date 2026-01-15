@@ -60,6 +60,31 @@ Supported types:
  * `List[N]`
  * `Bitlist[N]`
 
+## Using Custom Hash Functions
+
+ssz.zig is hash-function agnostic. Pass your hasher as a type parameter:
+
+```zig
+const std = @import("std");
+const ssz = @import("ssz.zig");
+
+// Using SHA256 (from stdlib)
+const Sha256 = std.crypto.hash.sha2.Sha256;
+try ssz.hashTreeRoot(Sha256, MyType, value, &root, allocator);
+
+// Using a custom hasher (must implement init/update/final API)
+const MyHasher = ...; // Your hasher type
+try ssz.hashTreeRoot(MyHasher, MyType, value, &root, allocator);
+```
+
+**Required Hasher API:**
+```zig
+pub const Options = struct {};
+pub fn init(_: Options) Self;
+pub fn update(self: *Self, data: []const u8) void;
+pub fn final(self: *Self, out: *[Self.digest_length]u8) void; // out size matches 32 bytes for SSZ
+```
+
 ## Contributing
 
 Simply create an issue or a PR.

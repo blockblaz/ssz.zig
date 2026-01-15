@@ -6,6 +6,7 @@ const hashTreeRoot = libssz.hashTreeRoot;
 const std = @import("std");
 const ArrayList = std.ArrayList;
 const expect = std.testing.expect;
+const Sha256 = std.crypto.hash.sha2.Sha256;
 
 // Beacon chain Validator struct for compatibility testing
 const Validator = struct {
@@ -65,7 +66,7 @@ test "Validator struct hash tree root" {
     };
 
     var hash: [32]u8 = undefined;
-    try hashTreeRoot(Validator, validator, &hash, std.testing.allocator);
+    try hashTreeRoot(Sha256, Validator, validator, &hash, std.testing.allocator);
 
     // Validate against expected hash
     const expected_validator_hash = [_]u8{ 0x70, 0x68, 0xE5, 0x06, 0xCB, 0xFF, 0xCD, 0x31, 0xBD, 0x2D, 0x13, 0x42, 0x5E, 0x4F, 0xDE, 0x98, 0x6E, 0xF3, 0x5E, 0x6F, 0xB5, 0x0F, 0x35, 0x9D, 0x7A, 0x26, 0xB6, 0x33, 0x2E, 0xE2, 0xCB, 0x94 };
@@ -73,7 +74,7 @@ test "Validator struct hash tree root" {
 
     // Hash should be deterministic for the same validator
     var hash2: [32]u8 = undefined;
-    try hashTreeRoot(Validator, validator, &hash2, std.testing.allocator);
+    try hashTreeRoot(Sha256, Validator, validator, &hash2, std.testing.allocator);
     try expect(std.mem.eql(u8, &hash, &hash2));
 
     // Different validator should produce different hash
@@ -89,7 +90,7 @@ test "Validator struct hash tree root" {
     };
 
     var hash3: [32]u8 = undefined;
-    try hashTreeRoot(Validator, validator2, &hash3, std.testing.allocator);
+    try hashTreeRoot(Sha256, Validator, validator2, &hash3, std.testing.allocator);
     try expect(!std.mem.eql(u8, &hash, &hash3));
 }
 
@@ -116,12 +117,12 @@ test "Individual Validator serialization and hash" {
     try expect(std.mem.eql(u8, list.items, &expected_validator_bytes));
 
     // Test hash tree root
-    var hash: [32]u8 = undefined;
-    try hashTreeRoot(Validator, validator, &hash, std.testing.allocator);
+    var root: [32]u8 = undefined;
+    try hashTreeRoot(Sha256, Validator, validator, &root, std.testing.allocator);
 
     // Validate against expected hash
     const expected_validator_hash = [_]u8{ 0x70, 0x68, 0xE5, 0x06, 0xCB, 0xFF, 0xCD, 0x31, 0xBD, 0x2D, 0x13, 0x42, 0x5E, 0x4F, 0xDE, 0x98, 0x6E, 0xF3, 0x5E, 0x6F, 0xB5, 0x0F, 0x35, 0x9D, 0x7A, 0x26, 0xB6, 0x33, 0x2E, 0xE2, 0xCB, 0x94 };
-    try expect(std.mem.eql(u8, &hash, &expected_validator_hash));
+    try expect(std.mem.eql(u8, &root, &expected_validator_hash));
 }
 
 test "List[Validator] serialization and hash tree root" {
@@ -191,14 +192,14 @@ test "List[Validator] serialization and hash tree root" {
 
     // Test hash tree root
     var hash1: [32]u8 = undefined;
-    try hashTreeRoot(ValidatorList, validator_list, &hash1, std.testing.allocator);
+    try hashTreeRoot(Sha256, ValidatorList, validator_list, &hash1, std.testing.allocator);
 
     // Validate against expected hash
     const expected_validator_list_hash = [_]u8{ 0x54, 0x80, 0xF8, 0x35, 0xD7, 0x52, 0xF7, 0x27, 0xC8, 0xF1, 0xE9, 0xCC, 0x0F, 0x84, 0x2B, 0x25, 0x76, 0xA5, 0x1A, 0xD2, 0xB7, 0xB5, 0x10, 0xF1, 0xA5, 0x39, 0xF7, 0xD8, 0xD0, 0x87, 0xC3, 0xC2 };
     try expect(std.mem.eql(u8, &hash1, &expected_validator_list_hash));
 
     var hash2: [32]u8 = undefined;
-    try hashTreeRoot(ValidatorList, deserialized_list, &hash2, std.testing.allocator);
+    try hashTreeRoot(Sha256, ValidatorList, deserialized_list, &hash2, std.testing.allocator);
 
     // Hash should be the same for original and deserialized lists
     try expect(std.mem.eql(u8, &hash1, &hash2));
@@ -281,21 +282,21 @@ test "BeamBlockBody with validator array - full cycle" {
 
     // Test hash tree root consistency
     var hash_original: [32]u8 = undefined;
-    try hashTreeRoot(BeamBlockBody, beam_block_body, &hash_original, std.testing.allocator);
+    try hashTreeRoot(Sha256, BeamBlockBody, beam_block_body, &hash_original, std.testing.allocator);
 
     // Validate against expected hash
     const expected_beam_block_body_hash = [_]u8{ 0x34, 0xF2, 0xBC, 0x58, 0xA0, 0xBF, 0x20, 0x72, 0x43, 0xF8, 0xC2, 0x5E, 0x0F, 0x83, 0x5E, 0x36, 0x90, 0x73, 0xD5, 0xAC, 0x97, 0x1E, 0x9A, 0x53, 0x71, 0x14, 0xA0, 0xFD, 0x1C, 0xC8, 0xD8, 0xE4 };
     try expect(std.mem.eql(u8, &hash_original, &expected_beam_block_body_hash));
 
     var hash_deserialized: [32]u8 = undefined;
-    try hashTreeRoot(BeamBlockBody, deserialized_body, &hash_deserialized, std.testing.allocator);
+    try hashTreeRoot(Sha256, BeamBlockBody, deserialized_body, &hash_deserialized, std.testing.allocator);
 
     // Hashes should be identical for original and deserialized data
     try expect(std.mem.eql(u8, &hash_original, &hash_deserialized));
 
     // Test hash determinism
     var hash_duplicate: [32]u8 = undefined;
-    try hashTreeRoot(BeamBlockBody, beam_block_body, &hash_duplicate, std.testing.allocator);
+    try hashTreeRoot(Sha256, BeamBlockBody, beam_block_body, &hash_duplicate, std.testing.allocator);
     try expect(std.mem.eql(u8, &hash_original, &hash_duplicate));
 }
 
@@ -383,10 +384,10 @@ test "Zeam-style List/Bitlist usage with tree root stability" {
     var state_hash1: [32]u8 = undefined;
     var state_hash2: [32]u8 = undefined;
 
-    try hashTreeRoot(ZeamBeamBlockBody, body, &body_hash1, std.testing.allocator);
-    try hashTreeRoot(ZeamBeamBlockBody, body, &body_hash2, std.testing.allocator);
-    try hashTreeRoot(BeamState, state, &state_hash1, std.testing.allocator);
-    try hashTreeRoot(BeamState, state, &state_hash2, std.testing.allocator);
+    try hashTreeRoot(Sha256, ZeamBeamBlockBody, body, &body_hash1, std.testing.allocator);
+    try hashTreeRoot(Sha256, ZeamBeamBlockBody, body, &body_hash2, std.testing.allocator);
+    try hashTreeRoot(Sha256, BeamState, state, &state_hash1, std.testing.allocator);
+    try hashTreeRoot(Sha256, BeamState, state, &state_hash2, std.testing.allocator);
 
     // Validate against expected hashes
     const expected_zeam_body_hash = [_]u8{ 0xAA, 0x2C, 0x76, 0x39, 0x96, 0xA6, 0xDD, 0x26, 0x25, 0x13, 0x12, 0x8D, 0xEA, 0xDF, 0xCB, 0x69, 0xF1, 0xEC, 0xEB, 0x60, 0xA8, 0xFF, 0xAC, 0xC7, 0xA7, 0xE4, 0x28, 0x3C, 0x74, 0xAA, 0x6A, 0xE4 };
@@ -452,7 +453,7 @@ test "BeamState with historical roots - comprehensive test" {
 
     // Test hash tree root calculation
     var original_hash: [32]u8 = undefined;
-    try hashTreeRoot(BeamState, beam_state, &original_hash, std.testing.allocator);
+    try hashTreeRoot(Sha256, BeamState, beam_state, &original_hash, std.testing.allocator);
 
     // Validate against expected hash
     const expected_comprehensive_beam_state_hash = [_]u8{ 0xBD, 0x36, 0x59, 0x5E, 0x3B, 0x4A, 0x51, 0x9C, 0xF3, 0x5F, 0x4F, 0x96, 0x88, 0x9E, 0x86, 0x10, 0xFF, 0x45, 0x20, 0x49, 0x15, 0xAE, 0x96, 0x2E, 0xF4, 0x0C, 0x81, 0x6B, 0xF7, 0x45, 0x4A, 0x17 };
@@ -488,7 +489,7 @@ test "BeamState with historical roots - comprehensive test" {
 
     // Test hash tree root consistency
     var deserialized_hash: [32]u8 = undefined;
-    try hashTreeRoot(BeamState, deserialized_state, &deserialized_hash, std.testing.allocator);
+    try hashTreeRoot(Sha256, BeamState, deserialized_state, &deserialized_hash, std.testing.allocator);
 
     // Verify hash tree roots are identical
     try expect(std.mem.eql(u8, &original_hash, &deserialized_hash));
@@ -526,7 +527,7 @@ test "BeamState with empty historical roots" {
 
     // Test hash tree root calculation
     var original_hash: [32]u8 = undefined;
-    try hashTreeRoot(SimpleBeamState, beam_state, &original_hash, std.testing.allocator);
+    try hashTreeRoot(Sha256, SimpleBeamState, beam_state, &original_hash, std.testing.allocator);
 
     // Validate against actual hash
     const expected_empty_beam_state_hash = [_]u8{ 0x58, 0xD2, 0x2B, 0xA0, 0x04, 0x45, 0xE8, 0xB7, 0x39, 0x5E, 0xC3, 0x93, 0x92, 0x45, 0xC6, 0xF1, 0x5A, 0x29, 0x91, 0xA5, 0x70, 0x3F, 0xC5, 0x05, 0x88, 0x10, 0x57, 0xDE, 0x9D, 0xF3, 0x64, 0x10 };
@@ -547,7 +548,7 @@ test "BeamState with empty historical roots" {
 
     // Test hash tree root consistency
     var deserialized_hash: [32]u8 = undefined;
-    try hashTreeRoot(SimpleBeamState, deserialized_state, &deserialized_hash, std.testing.allocator);
+    try hashTreeRoot(Sha256, SimpleBeamState, deserialized_state, &deserialized_hash, std.testing.allocator);
 
     // Verify hash tree roots are identical
     try expect(std.mem.eql(u8, &original_hash, &deserialized_hash));
@@ -593,7 +594,7 @@ test "BeamState with maximum historical roots" {
 
     // Test hash tree root calculation
     var original_hash: [32]u8 = undefined;
-    try hashTreeRoot(MaxBeamState, beam_state, &original_hash, std.testing.allocator);
+    try hashTreeRoot(Sha256, MaxBeamState, beam_state, &original_hash, std.testing.allocator);
 
     // Validate against actual hash
     const expected_max_beam_state_hash = [_]u8{ 0x3F, 0xFC, 0x7A, 0xA4, 0x85, 0x21, 0xD4, 0x02, 0x36, 0x46, 0x19, 0x2E, 0x8D, 0x73, 0xBC, 0x11, 0x3D, 0x1D, 0xE7, 0xF4, 0xDE, 0xC4, 0xD9, 0x6E, 0x94, 0x52, 0xD2, 0xCB, 0x95, 0xE3, 0x22, 0x9A };
@@ -619,7 +620,7 @@ test "BeamState with maximum historical roots" {
 
     // Test hash tree root consistency
     var deserialized_hash: [32]u8 = undefined;
-    try hashTreeRoot(MaxBeamState, deserialized_state, &deserialized_hash, std.testing.allocator);
+    try hashTreeRoot(Sha256, MaxBeamState, deserialized_state, &deserialized_hash, std.testing.allocator);
 
     try expect(std.mem.eql(u8, &original_hash, &deserialized_hash));
 }
@@ -673,7 +674,7 @@ test "BeamState historical roots access and comparison" {
 
     // Test hash tree root calculation
     var original_hash: [32]u8 = undefined;
-    try hashTreeRoot(AccessBeamState, beam_state, &original_hash, std.testing.allocator);
+    try hashTreeRoot(Sha256, AccessBeamState, beam_state, &original_hash, std.testing.allocator);
 
     // Validate against expected hash
     const expected_access_beam_state_hash = [_]u8{ 0x22, 0x3E, 0xCB, 0xDD, 0x62, 0x46, 0x7F, 0x7F, 0x0F, 0xA8, 0x2C, 0x91, 0x54, 0x1F, 0xF4, 0xEA, 0xBF, 0x92, 0xB6, 0xB7, 0x67, 0x57, 0x02, 0x67, 0x16, 0xEF, 0x3A, 0xB0, 0x96, 0x4E, 0x91, 0x9E };
@@ -707,7 +708,7 @@ test "BeamState historical roots access and comparison" {
 
     // Test hash tree root consistency
     var deserialized_hash: [32]u8 = undefined;
-    try hashTreeRoot(AccessBeamState, deserialized_state, &deserialized_hash, std.testing.allocator);
+    try hashTreeRoot(Sha256, AccessBeamState, deserialized_state, &deserialized_hash, std.testing.allocator);
 
     try expect(std.mem.eql(u8, &original_hash, &deserialized_hash));
 }
@@ -743,7 +744,7 @@ test "SimpleBeamState with empty historical roots" {
 
     // Test hash tree root calculation
     var original_hash: [32]u8 = undefined;
-    try hashTreeRoot(SimpleBeamState, beam_state, &original_hash, std.testing.allocator);
+    try hashTreeRoot(Sha256, SimpleBeamState, beam_state, &original_hash, std.testing.allocator);
 
     // Validate against actual hash
     const expected_simple_beam_state_hash = [_]u8{ 0x58, 0xD2, 0x2B, 0xA0, 0x04, 0x45, 0xE8, 0xB7, 0x39, 0x5E, 0xC3, 0x93, 0x92, 0x45, 0xC6, 0xF1, 0x5A, 0x29, 0x91, 0xA5, 0x70, 0x3F, 0xC5, 0x05, 0x88, 0x10, 0x57, 0xDE, 0x9D, 0xF3, 0x64, 0x10 };
@@ -763,7 +764,7 @@ test "SimpleBeamState with empty historical roots" {
 
     // Test hash tree root consistency
     var deserialized_hash: [32]u8 = undefined;
-    try hashTreeRoot(SimpleBeamState, deserialized_state, &deserialized_hash, std.testing.allocator);
+    try hashTreeRoot(Sha256, SimpleBeamState, deserialized_state, &deserialized_hash, std.testing.allocator);
 
     // Verify hash tree roots are identical
     try expect(std.mem.eql(u8, &original_hash, &deserialized_hash));
@@ -775,7 +776,7 @@ test "hashTreeRoot for pointer types" {
     // Test pointer size .one - SUPPORTED
     {
         var value: u32 = 8;
-        try hashTreeRoot(*u32, &value, &hash, std.testing.allocator);
+        try hashTreeRoot(Sha256, *u32, &value, &hash, std.testing.allocator);
 
         var deserialized: u32 = undefined;
         try deserialize(u32, &hash, &deserialized, std.testing.allocator);
@@ -786,7 +787,7 @@ test "hashTreeRoot for pointer types" {
     {
         var values = [4]u8{ 0xAA, 0xBB, 0xCC, 0xDD };
         const values_ptr: *[4]u8 = &values;
-        try hashTreeRoot(*[4]u8, values_ptr, &hash, std.testing.allocator);
+        try hashTreeRoot(Sha256, *[4]u8, values_ptr, &hash, std.testing.allocator);
 
         var deserialized: [4]u8 = undefined;
         try deserialize([4]u8, &hash, &deserialized, std.testing.allocator);
@@ -797,13 +798,13 @@ test "hashTreeRoot for pointer types" {
     {
         var values = [4]u8{ 0xAA, 0xBB, 0xCC, 0xDD };
         const values_ptr: [*]u8 = &values;
-        try std.testing.expectError(error.UnSupportedPointerType, hashTreeRoot([*]u8, values_ptr, &hash, std.testing.allocator));
+        try std.testing.expectError(error.UnSupportedPointerType, hashTreeRoot(Sha256, [*]u8, values_ptr, &hash, std.testing.allocator));
     }
 
     // Test pointer size .c - should return error
     {
         var values = [4]u8{ 0xAA, 0xBB, 0xCC, 0xDD };
         const values_ptr: [*c]u8 = &values;
-        try std.testing.expectError(error.UnSupportedPointerType, hashTreeRoot([*c]u8, values_ptr, &hash, std.testing.allocator));
+        try std.testing.expectError(error.UnSupportedPointerType, hashTreeRoot(Sha256, [*c]u8, values_ptr, &hash, std.testing.allocator));
     }
 }

@@ -7,7 +7,6 @@ const deserialize = lib.deserialize;
 const isFixedSizeObject = lib.isFixedSizeObject;
 const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;
-const sha256 = std.crypto.hash.sha2.Sha256;
 const hashes_of_zero = @import("./zeros.zig").hashes_of_zero;
 
 // SSZ specification constants
@@ -16,7 +15,7 @@ const chunk = [BYTES_PER_CHUNK]u8;
 const zero_chunk: chunk = [_]u8{0} ** BYTES_PER_CHUNK;
 
 /// Implements the SSZ `List[N]` container.
-pub fn List(comptime T: type, comptime N: usize) type {
+pub fn List(T: type, comptime N: usize) type {
     // Compile-time check: List[bool, N] is not allowed, use Bitlist[N] instead
     if (T == bool) {
         @compileError("List[bool, N] is not supported. Use Bitlist(" ++ std.fmt.comptimePrint("{}", .{N}) ++ ") instead for boolean lists.");
@@ -154,7 +153,7 @@ pub fn List(comptime T: type, comptime N: usize) type {
             return lib.serializedSize(@TypeOf(inner_slice), inner_slice);
         }
 
-        pub fn hashTreeRoot(self: *const Self, out: *[32]u8, allctr: Allocator) !void {
+        pub fn hashTreeRoot(self: *const Self, Hasher: type, out: *[32]u8, allctr: Allocator) !void {
             const items = self.constSlice();
 
             switch (@typeInfo(Item)) {
@@ -167,21 +166,21 @@ pub fn List(comptime T: type, comptime N: usize) type {
                     const items_per_chunk = BYTES_PER_CHUNK / bytes_per_item;
                     const chunks_for_max_capacity = (N + items_per_chunk - 1) / items_per_chunk;
                     var tmp: chunk = undefined;
-                    try lib.merkleize(sha256, chunks, chunks_for_max_capacity, &tmp);
-                    lib.mixInLength2(tmp, items.len, out);
+                    try lib.merkleize(Hasher, chunks, chunks_for_max_capacity, &tmp);
+                    lib.mixInLength2(Hasher, tmp, items.len, out);
                 },
                 else => {
                     var chunks = ArrayList(chunk).init(allctr);
                     defer chunks.deinit();
                     var tmp: chunk = undefined;
                     for (items) |item| {
-                        try lib.hashTreeRoot(Item, item, &tmp, allctr);
+                        try lib.hashTreeRoot(Hasher, Item, item, &tmp, allctr);
                         try chunks.append(tmp);
                     }
                     // Always use N (max capacity) for merkleization, even when empty
                     // This ensures proper tree depth according to SSZ specification
-                    try lib.merkleize(sha256, chunks.items, N, &tmp);
-                    lib.mixInLength2(tmp, items.len, out);
+                    try lib.merkleize(Hasher, chunks.items, N, &tmp);
+                    lib.mixInLength2(Hasher, tmp, items.len, out);
                 },
             }
         }
@@ -324,7 +323,7 @@ pub fn Bitlist(comptime N: usize) type {
             return (self.length + 7 + 1) / 8;
         }
 
-        pub fn hashTreeRoot(self: *const Self, out: *[32]u8, allctr: Allocator) !void {
+        pub fn hashTreeRoot(self: *const Self, Hasher: type, out: *[32]u8, allctr: Allocator) !void {
             const bit_length = self.length;
 
             var bitfield_bytes = ArrayList(u8).init(allctr);
@@ -351,8 +350,8 @@ pub fn Bitlist(comptime N: usize) type {
 
             // Use chunk_count limit as per SSZ specification
             const chunk_count_limit = (N + 255) / 256;
-            try lib.merkleize(sha256, chunks, chunk_count_limit, &tmp);
-            lib.mixInLength2(tmp, bit_length, out);
+            try lib.merkleize(Hasher, chunks, chunk_count_limit, &tmp);
+            lib.mixInLength2(Hasher, tmp, bit_length, out);
         }
 
         /// Validates that the bitlist is correctly formed

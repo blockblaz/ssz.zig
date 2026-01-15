@@ -516,7 +516,7 @@ pub fn deserialize(T: type, serialized: []const u8, out: *T, allocator: ?std.mem
     }
 }
 
-pub fn mixInLength2(Hasher: type, root: [32]u8, length: usize, out: *[32]u8) void {
+pub fn mixInLength2(Hasher: type, root: [Hasher.digest_length]u8, length: usize, out: *[Hasher.digest_length]u8) void {
     var hasher = Hasher.init(Hasher.Options{});
     hasher.update(root[0..]);
 
@@ -526,7 +526,7 @@ pub fn mixInLength2(Hasher: type, root: [32]u8, length: usize, out: *[32]u8) voi
     hasher.final(out[0..]);
 }
 
-fn mixInLength(Hasher: type, root: [32]u8, length: [32]u8, out: *[32]u8) void {
+fn mixInLength(Hasher: type, root: [Hasher.digest_length]u8, length: [32]u8, out: *[Hasher.digest_length]u8) void {
     var hasher = Hasher.init(Hasher.Options{});
     hasher.update(root[0..]);
     hasher.update(length[0..]);
@@ -546,7 +546,7 @@ test "mixInLength" {
     try std.testing.expect(std.mem.eql(u8, mixin[0..], expected[0..]));
 }
 
-fn mixInSelector(Hasher: type, root: [32]u8, comptime selector: usize, out: *[32]u8) void {
+fn mixInSelector(Hasher: type, root: [Hasher.digest_length]u8, comptime selector: usize, out: *[Hasher.digest_length]u8) void {
     var hasher = Hasher.init(Hasher.Options{});
     hasher.update(root[0..]);
     var tmp = [_]u8{0} ** 32;
@@ -635,7 +635,7 @@ test "pack string" {
 }
 
 // merkleize recursively calculates the root hash of a Merkle tree.
-pub fn merkleize(Hasher: type, chunks: []chunk, limit: ?usize, out: *[32]u8) anyerror!void {
+pub fn merkleize(Hasher: type, chunks: []chunk, limit: ?usize, out: *[Hasher.digest_length]u8) anyerror!void {
     // Generate zero hashes for this hasher type at comptime
     const hashes_of_zero = comptime zeros.buildHashesOfZero(Hasher, 32, 256);
 
@@ -764,7 +764,7 @@ fn packBits(bits: []const bool, l: *ArrayList(u8)) ![]chunk {
     return std.mem.bytesAsSlice(chunk, l.items);
 }
 
-pub fn hashTreeRoot(Hasher: type, T: type, value: T, out: *[32]u8, allctr: Allocator) !void {
+pub fn hashTreeRoot(Hasher: type, T: type, value: T, out: *[Hasher.digest_length]u8, allctr: Allocator) !void {
     // Check if type has its own hashTreeRoot method at compile time
     if (comptime std.meta.hasFn(T, "hashTreeRoot")) {
         return value.hashTreeRoot(Hasher, out, allctr);

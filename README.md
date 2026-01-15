@@ -82,7 +82,7 @@ try ssz.hashTreeRoot(MyHasher, MyType, value, &root, allocator);
 pub const Options = struct {};
 pub fn init(_: Options) Self;
 pub fn update(self: *Self, data: []const u8) void;
-pub fn final(self: *Self, out: *[32]u8) void; // out size matches 32 bytes for SSZ
+pub fn final(self: *Self, out: *[Self.digest_length]u8) void; // out size matches 32 bytes for SSZ
 ```
 
 ## Contributing

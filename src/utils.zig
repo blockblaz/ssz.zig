@@ -6,6 +6,7 @@ const serialize = lib.serialize;
 const deserialize = lib.deserialize;
 const isFixedSizeObject = lib.isFixedSizeObject;
 const ArrayList = std.ArrayList;
+const BoundedArray = std.BoundedArray;
 const Allocator = std.mem.Allocator;
 const hashes_of_zero = @import("./zeros.zig").hashes_of_zero;
 
@@ -24,7 +25,7 @@ pub fn List(T: type, comptime N: usize) type {
     return struct {
         const Self = @This();
         const Item = T;
-        const Inner = std.ArrayList(T);
+        const Inner = BoundedArray(T, N);
 
         const OFFSET_SIZE = 4;
 
@@ -40,18 +41,7 @@ pub fn List(T: type, comptime N: usize) type {
 
         pub fn sszDecode(serialized: []const u8, out: *Self, allocator: ?std.mem.Allocator) !void {
             // BitList[N] or regular List[N]?
-            const alloc = allocator orelse return error.AllocatorRequired;
-            out.* = try init(alloc);
-
-            // FastSSZ-style capacity optimization: pre-allocate based on input size
-            // TODO: replace this with the definite value, taken from the list
-            if (serialized.len > 0) {
-                const estimated_capacity = if (try lib.isFixedSizeObject(Self.Item))
-                    serialized.len / (try lib.serializedFixedSize(Self.Item))
-                else
-                    serialized.len / 8; // Conservative estimate for dynamic types
-                try out.inner.ensureTotalCapacity(estimated_capacity);
-            }
+            out.* = init();
 
             if (Self.Item == bool) {
                 @panic("Use the optimized utils.Bitlist(N) instead of utils.List(bool, N)");
@@ -84,14 +74,14 @@ pub fn List(T: type, comptime N: usize) type {
                     if (i > 0 and start < indices[i - 1]) {
                         return error.OffsetOrdering;
                     }
-                    const item = try out.inner.addOne();
+                    const item = out.inner.addOne() catch return error.Overflow;
                     try deserialize(Self.Item, serialized[start..end], item, allocator);
                 }
             }
         }
 
-        pub fn init(allocator: Allocator) !Self {
-            return .{ .inner = Inner.init(allocator) };
+        pub fn init() Self {
+            return .{ .inner = Inner{} };
         }
 
         pub fn eql(self: *const Self, other: *const Self) bool {
@@ -111,41 +101,38 @@ pub fn List(T: type, comptime N: usize) type {
         }
 
         pub fn deinit(self: *Self) void {
-            self.inner.deinit();
+            _ = self;
+            // BoundedArray is stack-allocated, no cleanup needed
         }
 
-        pub fn append(self: *Self, item: Self.Item) error{ Overflow, OutOfMemory }!void {
-            if (self.inner.items.len >= N) return error.Overflow;
-            return self.inner.append(item);
+        pub fn append(self: *Self, item: Self.Item) error{Overflow}!void {
+            self.inner.append(item) catch return error.Overflow;
         }
 
         pub fn slice(self: *Self) []T {
-            return self.inner.items;
+            return self.inner.slice();
         }
 
         pub fn constSlice(self: *const Self) []const T {
-            return self.inner.items;
+            return self.inner.constSlice();
         }
 
-        pub fn fromSlice(allocator: Allocator, m: []const T) !Self {
-            if (m.len > N) return error.Overflow;
-            var inner = Inner.init(allocator);
-            try inner.appendSlice(m);
-            return .{ .inner = inner };
+        pub fn fromSlice(m: []const T) error{Overflow}!Self {
+            return .{ .inner = Inner.fromSlice(m) catch return error.Overflow };
         }
 
         pub fn get(self: Self, i: usize) error{IndexOutOfBounds}!T {
-            if (i >= self.inner.items.len) return error.IndexOutOfBounds;
-            return self.inner.items[i];
+            if (i >= self.inner.len) return error.IndexOutOfBounds;
+            return self.inner.buffer[i];
         }
 
         pub fn set(self: *Self, i: usize, item: T) error{IndexOutOfBounds}!void {
-            if (i >= self.inner.items.len) return error.IndexOutOfBounds;
-            self.inner.items[i] = item;
+            if (i >= self.inner.len) return error.IndexOutOfBounds;
+            self.inner.buffer[i] = item;
         }
 
         pub fn len(self: *const Self) usize {
-            return self.inner.items.len;
+            return self.inner.len;
         }
 
         pub fn serializedSize(self: *const Self) !usize {

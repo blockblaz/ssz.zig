@@ -670,7 +670,7 @@ test "calculate the root hash of an union" {
 test "(de)serialize List[N] of fixed-length objects" {
     const MAX_VALIDATORS_PER_COMMITTEE: usize = 2048;
     const ListValidatorIndex = utils.List(u64, MAX_VALIDATORS_PER_COMMITTEE);
-    var attesting_indices = try ListValidatorIndex.init(std.testing.allocator);
+    var attesting_indices = ListValidatorIndex.init();
     defer attesting_indices.deinit();
     for (0..10) |i| {
         try attesting_indices.append(i * 100);
@@ -678,7 +678,7 @@ test "(de)serialize List[N] of fixed-length objects" {
     var list = ArrayList(u8).init(std.testing.allocator);
     defer list.deinit();
     try serialize(ListValidatorIndex, attesting_indices, &list);
-    var attesting_indices_deser = try ListValidatorIndex.init(std.testing.allocator);
+    var attesting_indices_deser = ListValidatorIndex.init();
     defer attesting_indices_deser.deinit();
     try deserialize(ListValidatorIndex, list.items, &attesting_indices_deser, std.testing.allocator);
     try expect(attesting_indices.eql(&attesting_indices_deser));
@@ -686,7 +686,7 @@ test "(de)serialize List[N] of fixed-length objects" {
 
 test "(de)serialize List[N] of variable-length objects" {
     const ListOfStrings = utils.List([]const u8, 16);
-    var string_list = try ListOfStrings.init(std.testing.allocator);
+    var string_list = ListOfStrings.init();
     defer string_list.deinit();
     for (0..10) |i| {
         try string_list.append(try std.fmt.allocPrint(std.testing.allocator, "count={}", .{i}));
@@ -697,7 +697,7 @@ test "(de)serialize List[N] of variable-length objects" {
     var list = ArrayList(u8).init(std.testing.allocator);
     defer list.deinit();
     try serialize(ListOfStrings, string_list, &list);
-    var string_list_deser = try ListOfStrings.init(std.testing.allocator);
+    var string_list_deser = ListOfStrings.init();
     defer string_list_deser.deinit();
     try deserialize(ListOfStrings, list.items, &string_list_deser, std.testing.allocator);
     try expect(string_list.len() == string_list_deser.len());
@@ -711,7 +711,7 @@ test "List[N].fromSlice of structs" {
     var start: usize = 0;
     var end: usize = pastries.len;
     _ = .{ &start, &end };
-    var pastry_list = try PastryList.fromSlice(std.testing.allocator, pastries[start..end]);
+    var pastry_list = try PastryList.fromSlice(pastries[start..end]);
     defer pastry_list.deinit();
     for (pastries, 0..) |pastry, i| {
         try expect(std.mem.eql(u8, (try pastry_list.get(i)).name, pastry.name));
@@ -960,9 +960,9 @@ test "slice hashtree root simple type" {
 test "List tree root calculation" {
     const ListU64 = utils.List(u64, 1024);
 
-    var empty_list = try ListU64.init(std.testing.allocator);
+    var empty_list = ListU64.init();
     defer empty_list.deinit();
-    var list_with_items = try ListU64.init(std.testing.allocator);
+    var list_with_items = ListU64.init();
     defer list_with_items.deinit();
     try list_with_items.append(42);
     try list_with_items.append(123);
@@ -978,7 +978,7 @@ test "List tree root calculation" {
 
     try expect(!std.mem.eql(u8, &empty_hash, &filled_hash));
 
-    var same_content_list = try ListU64.init(std.testing.allocator);
+    var same_content_list = ListU64.init();
     defer same_content_list.deinit();
     try same_content_list.append(42);
     try same_content_list.append(123);
@@ -1026,7 +1026,7 @@ test "Bitlist tree root calculation" {
 test "List of composite types tree root" {
     const ListOfPastry = utils.List(Pastry, 100);
 
-    var pastry_list = try ListOfPastry.init(std.testing.allocator);
+    var pastry_list = ListOfPastry.init();
     defer pastry_list.deinit();
     try pastry_list.append(Pastry{ .name = "croissant", .weight = 20 });
     try pastry_list.append(Pastry{ .name = "muffin", .weight = 30 });
@@ -1034,7 +1034,7 @@ test "List of composite types tree root" {
     var hash1: [32]u8 = undefined;
     try hashTreeRoot(Sha256, ListOfPastry, pastry_list, &hash1, std.testing.allocator);
 
-    var pastry_list2 = try ListOfPastry.init(std.testing.allocator);
+    var pastry_list2 = ListOfPastry.init();
     defer pastry_list2.deinit();
     try pastry_list2.append(Pastry{ .name = "croissant", .weight = 20 });
     try pastry_list2.append(Pastry{ .name = "muffin", .weight = 30 });
@@ -1054,7 +1054,7 @@ test "List of composite types tree root" {
 test "serializedSize correctly calculates List/Bitlist sizes" {
     // Test List size calculation
     const ListType = utils.List(u64, 100);
-    var list = try ListType.init(std.testing.allocator);
+    var list = ListType.init();
     defer list.deinit();
     try list.append(123);
     try list.append(456);
@@ -1279,7 +1279,7 @@ test "serialize max/min integer values" {
 
 test "Empty List hash tree root" {
     const ListU32 = utils.List(u32, 100);
-    var empty_list = try ListU32.init(std.testing.allocator);
+    var empty_list = ListU32.init();
     defer empty_list.deinit();
 
     var hash: [32]u8 = undefined;
@@ -1331,7 +1331,7 @@ test "Empty BitList (>256) hash tree root" {
 
 test "List at maximum capacity" {
     const ListU8 = utils.List(u8, 4);
-    var full_list = try ListU8.init(std.testing.allocator);
+    var full_list = ListU8.init();
     defer full_list.deinit();
 
     // Fill to capacity
@@ -1515,7 +1515,7 @@ test "uint256 hash tree root" {
 
 test "Single element List" {
     const ListU64 = utils.List(u64, 10);
-    var single = try ListU64.init(std.testing.allocator);
+    var single = ListU64.init();
     defer single.deinit();
     try single.append(42);
 
@@ -1667,7 +1667,7 @@ test "decodeDynamicLength - comprehensive validation" {
 }
 
 test "List validation - size limits enforced" {
-    var list = try utils.List(u32, 3).init(std.testing.allocator);
+    var list = utils.List(u32, 3).init();
     defer list.deinit();
 
     // Test oversized fixed-size list
@@ -1734,7 +1734,7 @@ test "Bitlist init consistency with List" {
     const TestList = utils.List(u32, 10);
     const TestBitlist = utils.Bitlist(10);
 
-    var list = try TestList.init(std.testing.allocator);
+    var list = TestList.init();
     defer list.deinit();
     var bitlist = try TestBitlist.init(std.testing.allocator);
     defer bitlist.deinit();
@@ -1744,7 +1744,7 @@ test "Bitlist init consistency with List" {
     try expect(bitlist.len() == 0);
 
     // Both should have reserved capacity but no actual elements
-    try expect(list.inner.items.len == 0);
+    try expect(list.inner.len == 0);
     try expect(bitlist.inner.items.len == 0);
 }
 
@@ -1897,21 +1897,21 @@ test "SSZ external reference vectors" {
 test "List fromSlice overflow rejection" {
     const TestList = utils.List(u32, 2);
     const oversized_slice = [_]u32{ 1, 2, 3, 4 };
-    const result = TestList.fromSlice(std.testing.allocator, &oversized_slice);
+    const result = TestList.fromSlice(&oversized_slice);
     try expectError(error.Overflow, result);
 }
 
 test "List fromSlice at exact capacity" {
     const TestList = utils.List(u32, 3);
     const exact_slice = [_]u32{ 10, 20, 30 };
-    var list = try TestList.fromSlice(std.testing.allocator, &exact_slice);
+    var list = try TestList.fromSlice(&exact_slice);
     defer list.deinit();
     try expect(list.len() == 3);
 }
 
 test "Zero capacity List" {
     const TestList = utils.List(u32, 0);
-    var list = try TestList.init(std.testing.allocator);
+    var list = TestList.init();
     defer list.deinit();
     try expect(list.len() == 0);
     try expectError(error.Overflow, list.append(1));
@@ -1927,7 +1927,7 @@ test "Zero capacity Bitlist" {
 
 test "Large capacity List overflow" {
     const TestList = utils.List(u8, 1000);
-    var list = try TestList.init(std.testing.allocator);
+    var list = TestList.init();
     defer list.deinit();
 
     var i: usize = 0;
@@ -2046,7 +2046,7 @@ test "nested dynamic list uses relative offsets" {
         dynamic_list: InnerList, // variable
     };
 
-    var inner_list = try InnerList.init(std.testing.allocator);
+    var inner_list = InnerList.init();
     defer inner_list.deinit();
 
     const item1: []const u8 = "hello";
@@ -2119,16 +2119,16 @@ test "deeply nested dynamic structures use relative offsets" {
         nested_lists: OuterList,
     };
 
-    var inner1 = try InnerList.init(std.testing.allocator);
+    var inner1 = InnerList.init();
     defer inner1.deinit();
     try inner1.append("a");
     try inner1.append("bb");
 
-    var inner2 = try InnerList.init(std.testing.allocator);
+    var inner2 = InnerList.init();
     defer inner2.deinit();
     try inner2.append("ccc");
 
-    var outer_list = try OuterList.init(std.testing.allocator);
+    var outer_list = OuterList.init();
     defer outer_list.deinit();
     try outer_list.append(inner1);
     try outer_list.append(inner2);

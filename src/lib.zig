@@ -119,6 +119,107 @@ pub fn isFixedSizeObject(T: type) !bool {
     return true;
 }
 
+/// Returns the maximum possible serialized byte length for type `T`.
+/// Useful for pre-allocating buffers or validating input bounds.
+/// For variable-length types (e.g. slice), use a type that encodes max length (e.g. List(T, N)) or returns error.
+pub fn maxInLength(T: type) !usize {
+    if (comptime std.meta.hasFn(T, "maxInLength")) {
+        return T.maxInLength();
+    }
+
+    const info = @typeInfo(T);
+    return switch (info) {
+        .int => @sizeOf(T),
+        .bool => @as(usize, 1),
+        .null => @as(usize, 0),
+        .array => |array| if (array.child == bool)
+            (array.len + 7) / 8
+        else blk: {
+            const child_max = try maxInLength(array.child);
+            if (try isFixedSizeObject(array.child)) {
+                break :blk array.len * child_max;
+            } else {
+                break :blk array.len * child_max + 4 * array.len;
+            }
+        },
+        .optional => 1 + try maxInLength(info.optional.child),
+        .pointer => |ptr| switch (ptr.size) {
+            .slice => error.NoMaxInLengthAvailable,
+            .one => maxInLength(ptr.child),
+            else => error.NoMaxInLengthAvailable,
+        },
+        .@"struct" => |str| blk: {
+            var total: usize = 0;
+            inline for (str.fields) |field| {
+                if (try isFixedSizeObject(field.type)) {
+                    total += try maxInLength(field.type);
+                } else {
+                    total += 4 + try maxInLength(field.type);
+                }
+            }
+            break :blk total;
+        },
+        .@"union" => |u| blk: {
+            if (u.tag_type == null) return error.UnionIsNotTagged;
+            var m: usize = 0;
+            inline for (u.fields) |f| {
+                const n = try maxInLength(f.type);
+                if (n > m) m = n;
+            }
+            break :blk 1 + m;
+        },
+        else => error.NoMaxInLengthAvailable,
+    };
+}
+
+/// Returns the minimum possible serialized byte length for type `T`.
+/// Used together with maxInLength to validate input bounds before deserializing.
+pub fn minInLength(T: type) !usize {
+    if (comptime std.meta.hasFn(T, "minInLength")) {
+        return T.minInLength();
+    }
+
+    const info = @typeInfo(T);
+    return switch (info) {
+        .int => @sizeOf(T),
+        .bool => @as(usize, 1),
+        .null => @as(usize, 0),
+        .array => |array| if (array.child == bool)
+            (array.len + 7) / 8
+        else if (try isFixedSizeObject(array.child))
+            array.len * try minInLength(array.child)
+        else
+            array.len * @sizeOf(u32) + array.len * try minInLength(array.child),
+        .optional => 1,
+        .pointer => |ptr| switch (ptr.size) {
+            .slice => error.NoMinInLengthAvailable,
+            .one => minInLength(ptr.child),
+            else => error.NoMinInLengthAvailable,
+        },
+        .@"struct" => |str| blk: {
+            var total: usize = 0;
+            inline for (str.fields) |field| {
+                if (try isFixedSizeObject(field.type)) {
+                    total += try minInLength(field.type);
+                } else {
+                    total += 4 + try minInLength(field.type);
+                }
+            }
+            break :blk total;
+        },
+        .@"union" => |u| blk: {
+            if (u.tag_type == null) return error.UnionIsNotTagged;
+            var m: usize = std.math.maxInt(usize);
+            inline for (u.fields) |f| {
+                const n = try minInLength(f.type);
+                if (n < m) m = n;
+            }
+            break :blk 1 + m;
+        },
+        else => error.NoMinInLengthAvailable,
+    };
+}
+
 /// Provides the generic serialization of any `data` var to SSZ. The
 /// serialization is written to the `ArrayList` `l`.
 pub fn serialize(T: type, data: T, l: *ArrayList(u8), allocator: Allocator) !void {
@@ -312,12 +413,29 @@ pub fn serialize(T: type, data: T, l: *ArrayList(u8), allocator: Allocator) !voi
     }
 }
 
-/// Takes a byte array containing the serialized payload of type `T` (with
-/// possible trailing data) and deserializes it into the `T` object pointed
-/// at by `out`.
+/// Takes a byte array containing the serialized payload of type `T` and
+/// deserializes it into the `T` object pointed at by `out`.
+/// The payload must be within [minInLength, maxInLength] bounds for `T`.
 pub fn deserialize(T: type, serialized: []const u8, out: *T, allocator: ?Allocator) !void {
+    const has_custom_decode = comptime std.meta.hasFn(T, "sszDecode");
+    const enforce_min = !has_custom_decode or comptime std.meta.hasFn(T, "minInLength");
+    const enforce_max = !has_custom_decode or comptime std.meta.hasFn(T, "maxInLength");
+
+    // Bounds check: ensure serialized length is within [minInLength, maxInLength]
+    const min_len: ?usize = if (enforce_min) blk: {
+        const m = minInLength(T) catch break :blk null;
+        break :blk m;
+    } else null;
+    if (min_len) |m| if (serialized.len < m) return error.PayloadTooSmall;
+
+    const max_len: ?usize = if (enforce_max) blk: {
+        const m = maxInLength(T) catch break :blk null;
+        break :blk m;
+    } else null;
+    if (max_len) |m| if (serialized.len > m) return error.PayloadTooLarge;
+
     // shortcut if the type implements its own decode method
-    if (comptime std.meta.hasFn(T, "sszDecode")) {
+    if (has_custom_decode) {
         return T.sszDecode(serialized, out, allocator);
     }
 
@@ -497,7 +615,7 @@ pub fn deserialize(T: type, serialized: []const u8, out: *T, allocator: ?Allocat
         .@"union" => {
             // Read the type index
             var union_index: u8 = undefined;
-            try deserialize(u8, serialized, &union_index, allocator);
+            try deserialize(u8, serialized[0..1], &union_index, allocator);
 
             // Use the index to figure out which type must
             // be deserialized.

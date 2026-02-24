@@ -779,7 +779,7 @@ test "hashTreeRoot for pointer types" {
         try hashTreeRoot(Sha256, *u32, &value, &hash, std.testing.allocator);
 
         var deserialized: u32 = undefined;
-        try deserialize(u32, &hash, &deserialized, std.testing.allocator);
+        try deserialize(u32, hash[0..4], &deserialized, std.testing.allocator);
         try expect(deserialized == value);
     }
 
@@ -790,7 +790,7 @@ test "hashTreeRoot for pointer types" {
         try hashTreeRoot(Sha256, *[4]u8, values_ptr, &hash, std.testing.allocator);
 
         var deserialized: [4]u8 = undefined;
-        try deserialize([4]u8, &hash, &deserialized, std.testing.allocator);
+        try deserialize([4]u8, hash[0..4], &deserialized, std.testing.allocator);
         try expect(std.mem.eql(u8, &deserialized, values_ptr));
     }
 

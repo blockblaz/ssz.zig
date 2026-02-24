@@ -39,6 +39,19 @@ pub fn List(T: type, comptime N: usize) type {
             return false;
         }
 
+        /// Maximum serialized byte length for List(T, N) with at most N elements.
+        pub fn maxInLength() !usize {
+            if (try lib.isFixedSizeObject(Item)) {
+                return N * try lib.serializedFixedSize(Item);
+            }
+            return N * @sizeOf(u32) + N * try lib.maxInLength(Item);
+        }
+
+        /// Minimum serialized byte length for List(T, N) (empty list).
+        pub fn minInLength() usize {
+            return 0;
+        }
+
         pub fn sszDecode(serialized: []const u8, out: *Self, allocator: ?Allocator) !void {
             // BitList[N] or regular List[N]?
             const alloc = allocator orelse return error.AllocatorRequired;
@@ -59,11 +72,6 @@ pub fn List(T: type, comptime N: usize) type {
             } else if (try lib.isFixedSizeObject(Self.Item)) {
                 const pitch = try lib.serializedFixedSize(Self.Item);
                 const n_items = serialized.len / pitch;
-
-                // Validate list size against maximum N
-                if (n_items > N) {
-                    return error.ListTooBig;
-                }
 
                 for (0..n_items) |i| {
                     var item: Self.Item = undefined;
@@ -281,6 +289,16 @@ pub fn Bitlist(comptime N: usize) type {
 
         pub fn isFixedSizeObject() bool {
             return false;
+        }
+
+        /// Maximum serialized byte length for Bitlist(N) (N bits + sentinel).
+        pub fn maxInLength() usize {
+            return (N + 7 + 1) / 8;
+        }
+
+        /// Minimum serialized byte length for Bitlist(N) (empty bitlist: one byte with sentinel).
+        pub fn minInLength() usize {
+            return 1;
         }
 
         pub fn init(allocator: Allocator) !Self {

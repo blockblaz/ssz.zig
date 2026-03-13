@@ -1121,6 +1121,88 @@ test "isFixedSizeObject correctly identifies List/Bitlist as variable-size" {
     try expect(!try isFixedSizeObject(StructWithList));
 }
 
+test "maxInLength for fixed and variable types" {
+    try expect(try libssz.maxInLength(u8) == 1);
+    try expect(try libssz.maxInLength(u64) == 8);
+    try expect(try libssz.maxInLength(bool) == 1);
+    try expect(try libssz.maxInLength([4]u8) == 4);
+    try expect(try libssz.maxInLength([10]bool) == (10 + 7) / 8);
+
+    const ListU64 = utils.List(u64, 16);
+    try expect(try ListU64.maxInLength() == 16 * 8);
+
+    const Bitlist32 = utils.Bitlist(32);
+    try expect(Bitlist32.maxInLength() == (32 + 7 + 1) / 8);
+
+    const ListList = utils.List(utils.List(u8, 4), 2);
+    try expect(try ListList.maxInLength() == 2 * 4 + 2 * (4 * 1));
+
+    const S = struct {
+        a: u32,
+        b: [2]u8,
+    };
+    try expect(try libssz.maxInLength(S) == 4 + 2);
+}
+
+test "minInLength for fixed and variable types" {
+    try expect(try libssz.minInLength(u8) == 1);
+    try expect(try libssz.minInLength(u64) == 8);
+    try expect(try libssz.minInLength(bool) == 1);
+    try expect(try libssz.minInLength([4]u8) == 4);
+    try expect(try libssz.minInLength([10]bool) == (10 + 7) / 8);
+
+    const ListU64 = utils.List(u64, 16);
+    try expect(ListU64.minInLength() == 0);
+
+    const Bitlist32 = utils.Bitlist(32);
+    try expect(Bitlist32.minInLength() == 1);
+
+    const S = struct {
+        a: u32,
+        b: [2]u8,
+    };
+    try expect(try libssz.minInLength(S) == 4 + 2);
+
+    const VarS = struct {
+        a: u32,
+        b: []const u8,
+    };
+    _ = libssz.minInLength(VarS) catch |e| try expect(e == error.NoMinInLengthAvailable);
+}
+
+test "deserialize rejects payload shorter than minInLength" {
+    var out_u32: u32 = undefined;
+    try expectError(error.PayloadTooSmall, deserialize(u32, &[_]u8{ 0x01, 0x02 }, &out_u32, null));
+
+    var out_bool: bool = undefined;
+    try expectError(error.PayloadTooSmall, deserialize(bool, &[_]u8{}, &out_bool, null));
+
+    var out_fixed: [4]u8 = undefined;
+    try expectError(error.PayloadTooSmall, deserialize([4]u8, &[_]u8{ 0x01, 0x02 }, &out_fixed, null));
+}
+
+test "minInLength/maxInLength for struct with List field" {
+    const S = struct {
+        id: u32,
+        data: utils.List(u8, 8),
+    };
+    // min: 4 (u32) + 4 (offset for variable field) + 0 (empty list) = 8
+    try expect(try libssz.minInLength(S) == 4 + 4 + 0);
+    // max: 4 (u32) + 4 (offset for variable field) + 8*1 (full list) = 16
+    try expect(try libssz.maxInLength(S) == 4 + 4 + 8 * 1);
+}
+
+test "deserialize rejects payload longer than maxInLength" {
+    var out_u32: u32 = undefined;
+    try expectError(error.PayloadTooLarge, deserialize(u32, &[_]u8{ 0x01, 0x02, 0x03, 0x04, 0x05 }, &out_u32, null));
+
+    var out_bool: bool = undefined;
+    try expectError(error.PayloadTooLarge, deserialize(bool, &[_]u8{ 0x00, 0x01 }, &out_bool, null));
+
+    var out_fixed: [2]u8 = undefined;
+    try expectError(error.PayloadTooLarge, deserialize([2]u8, &[_]u8{ 0x01, 0x02, 0x03 }, &out_fixed, null));
+}
+
 test "zeam stf input" {
     const Bytes32 = [32]u8;
     const Bytes48 = [48]u8;
@@ -1682,7 +1764,7 @@ test "List validation - size limits enforced" {
             0x05, 0x00, 0x00, 0x00, // u32 = 5
         };
 
-        try std.testing.expectError(error.ListTooBig, deserialize(utils.List(u32, 3), &oversized_data, &list, std.testing.allocator));
+        try std.testing.expectError(error.PayloadTooLarge, deserialize(utils.List(u32, 3), &oversized_data, &list, std.testing.allocator));
     }
 }
 

@@ -363,7 +363,7 @@ pub fn Bitlist(comptime N: usize) type {
 
             // Pack bits into chunks (pad to chunk boundary)
             const padding_size = (BYTES_PER_CHUNK - bitfield_bytes.items.len % BYTES_PER_CHUNK) % BYTES_PER_CHUNK;
-            _ = try bitfield_bytes.writer(allocator).write(zero_chunk[0..padding_size]);
+            _ = try bitfield_bytes.appendSlice(allocator, zero_chunk[0..padding_size]);
 
             const chunks = std.mem.bytesAsSlice(chunk, bitfield_bytes.items);
             var tmp: chunk = undefined;

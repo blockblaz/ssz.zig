@@ -264,9 +264,7 @@ pub fn serialize(T: type, data: T, l: *ArrayList(u8), allocator: Allocator) !voi
                     var start = base;
 
                     // Reserve the space for the offset
-                    for (data) |_| {
-                        _ = try l.writer(allocator).writeInt(u32, 0, std.builtin.Endian.little);
-                    }
+                    _ = try l.addManyAsSlice(allocator, data.len * @sizeOf(u32));
 
                     // Now serialize one item after the other
                     // and update the offset list with its location.
@@ -292,7 +290,7 @@ pub fn serialize(T: type, data: T, l: *ArrayList(u8), allocator: Allocator) !voi
                 8, 16, 32, 64, 128, 256 => {},
                 else => return error.InvalidSerializedIntLengthType,
             }
-            _ = try l.writer(allocator).writeInt(T, data, std.builtin.Endian.little);
+            _ = std.mem.writeInt(T, try l.addManyAsArray(allocator, @sizeOf(T)), data, .little);
         },
         .pointer => |pointer| {
             // Bitlist[N] or list?
@@ -302,7 +300,7 @@ pub fn serialize(T: type, data: T, l: *ArrayList(u8), allocator: Allocator) !voi
                         @panic("use util.Bitlist instead of []bool");
                     }
                     if (@sizeOf(pointer.child) == 1) {
-                        _ = try l.writer(allocator).write(data);
+                        _ = try l.appendSlice(allocator, data);
                     } else {
                         if (try isFixedSizeObject(pointer.child)) {
                             for (data) |item| {
@@ -315,9 +313,7 @@ pub fn serialize(T: type, data: T, l: *ArrayList(u8), allocator: Allocator) !voi
                             var start = base;
 
                             // Reserve the space for the offset
-                            for (data) |_| {
-                                _ = try l.writer(allocator).writeInt(u32, 0, std.builtin.Endian.little);
-                            }
+                            _ = try l.addManyAsSlice(allocator, data.len * @sizeOf(u32));
 
                             // Now serialize one item after the other
                             // and update the offset list with its location.
@@ -389,10 +385,10 @@ pub fn serialize(T: type, data: T, l: *ArrayList(u8), allocator: Allocator) !voi
         // Optionals are like unions, but their 0 value has to be 0.
         .optional => {
             if (data != null) {
-                _ = try l.writer(allocator).writeInt(u8, 1, std.builtin.Endian.little);
+                _ = try l.append(allocator, 1);
                 try serialize(info.optional.child, data.?, l, allocator);
             } else {
-                _ = try l.writer(allocator).writeInt(u8, 0, std.builtin.Endian.little);
+                _ = try l.append(allocator, 0);
             }
         },
         .@"union" => {
@@ -401,7 +397,7 @@ pub fn serialize(T: type, data: T, l: *ArrayList(u8), allocator: Allocator) !voi
             }
             inline for (info.@"union".fields, 0..) |f, index| {
                 if (@intFromEnum(data) == index) {
-                    _ = try l.writer(allocator).writeInt(u8, index, std.builtin.Endian.little);
+                    _ = std.mem.writeInt(u8, try l.addManyAsArray(allocator, 1), index, .little);
                     try serialize(f.type, @field(data, f.name), l, allocator);
                     return;
                 }
@@ -711,7 +707,7 @@ const zero_chunk: chunk = [_]u8{0} ** BYTES_PER_CHUNK;
 pub fn pack(T: type, values: T, l: *ArrayList(u8), allocator: Allocator) ![]chunk {
     try serialize(T, values, l, allocator);
     const padding_size = (BYTES_PER_CHUNK - l.items.len % BYTES_PER_CHUNK) % BYTES_PER_CHUNK;
-    _ = try l.writer(allocator).write(zero_chunk[0..padding_size]);
+    _ = try l.appendSlice(allocator, zero_chunk[0..padding_size]);
     return std.mem.bytesAsSlice(chunk, l.items);
 }
 
@@ -877,7 +873,7 @@ fn packBits(bits: []const bool, l: *ArrayList(u8), allocator: Allocator) ![]chun
 
     // pad the last chunk with 0s
     const padding_size = (BYTES_PER_CHUNK - l.items.len % BYTES_PER_CHUNK) % BYTES_PER_CHUNK;
-    _ = try l.writer(allocator).write(zero_chunk[0..padding_size]);
+    _ = try l.appendSlice(allocator, zero_chunk[0..padding_size]);
 
     return std.mem.bytesAsSlice(chunk, l.items);
 }

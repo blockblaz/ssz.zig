@@ -2247,6 +2247,59 @@ test "deeply nested dynamic structures use relative offsets" {
     try expect(std.mem.eql(u8, try decoded_inner2.get(0), "ccc"));
 }
 
+// Regression: deserialize for fixed-size [N]T where @sizeOf(T) > 1 wrote
+// only out[0], out[pitch], out[2*pitch] ... because the loop variable was
+// used as both the element index (out[i], i < out.len) and the byte step
+// (i += pitch). For [N]u8 (pitch=1) this accidentally worked; for any
+// wider element the interior elements were never written.
+test "roundtrip: [3]u16 preserves middle element" {
+    const data: [3]u16 = .{ 100, 200, 65535 };
+
+    var list: ArrayList(u8) = .empty;
+    defer list.deinit(std.testing.allocator);
+    try serialize([3]u16, data, &list, std.testing.allocator);
+    try expect(list.items.len == 6);
+
+    var out: [3]u16 = .{ 0, 0, 0 };
+    try deserialize([3]u16, list.items, &out, null);
+    try expect(out[0] == 100);
+    try expect(out[1] == 200);
+    try expect(out[2] == 65535);
+}
+
+test "roundtrip: [4]u64 preserves all elements" {
+    const data: [4]u64 = .{ 0, 1, 0xdeadbeef, std.math.maxInt(u64) };
+
+    var list: ArrayList(u8) = .empty;
+    defer list.deinit(std.testing.allocator);
+    try serialize([4]u64, data, &list, std.testing.allocator);
+    try expect(list.items.len == 32);
+
+    var out: [4]u64 = .{ 0, 0, 0, 0 };
+    try deserialize([4]u64, list.items, &out, null);
+    try expect(out[0] == 0);
+    try expect(out[1] == 1);
+    try expect(out[2] == 0xdeadbeef);
+    try expect(out[3] == std.math.maxInt(u64));
+}
+
+test "roundtrip: [2][4]u32 (nested fixed array) preserves inner elements" {
+    const data: [2][4]u32 = .{
+        .{ 1, 2, 3, 4 },
+        .{ 5, 6, 7, 8 },
+    };
+
+    var list: ArrayList(u8) = .empty;
+    defer list.deinit(std.testing.allocator);
+    try serialize([2][4]u32, data, &list, std.testing.allocator);
+    try expect(list.items.len == 32);
+
+    var out: [2][4]u32 = undefined;
+    try deserialize([2][4]u32, list.items, &out, null);
+    try expect(std.mem.eql(u32, &out[0], &.{ 1, 2, 3, 4 }));
+    try expect(std.mem.eql(u32, &out[1], &.{ 5, 6, 7, 8 }));
+}
+
 test {
     _ = @import("beacon_tests.zig");
 }

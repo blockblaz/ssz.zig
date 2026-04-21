@@ -451,9 +451,13 @@ pub fn deserialize(T: type, serialized: []const u8, out: *T, allocator: ?Allocat
             } else {
                 const U = info.array.child;
                 if (try isFixedSizeObject(U)) {
-                    var i: usize = 0;
+                    // Step by one element. The previous loop used `i`
+                    // simultaneously as element index (out[i], out.len)
+                    // and byte stride (i += pitch); for any element size
+                    // > 1 that skipped the interior elements, leaving
+                    // them undefined and breaking the roundtrip.
                     const pitch = try comptime serializedFixedSize(U);
-                    while (i < out.len) : (i += pitch) {
+                    for (0..out.len) |i| {
                         try deserialize(U, serialized[i * pitch .. (i + 1) * pitch], &out[i], allocator);
                     }
                 } else {

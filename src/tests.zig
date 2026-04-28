@@ -2300,6 +2300,134 @@ test "roundtrip: [2][4]u32 (nested fixed array) preserves inner elements" {
     try expect(std.mem.eql(u32, &out[1], &.{ 5, 6, 7, 8 }));
 }
 
+test "Cached hashTreeRoot for List(u64) matches uncached" {
+    const ListU64 = utils.List(u64, 1024);
+    var list = try ListU64.init(std.testing.allocator);
+    defer list.deinit();
+
+    try list.append(1);
+    try list.append(2);
+    try list.append(3);
+
+    // Compute hash via lib.hashTreeRoot (value copy, cache cleaned up after)
+    var uncached: [32]u8 = undefined;
+    try hashTreeRoot(Sha256, ListU64, list, &uncached, std.testing.allocator);
+
+    // Compute hash directly (cache persists on instance)
+    var cached: [32]u8 = undefined;
+    try list.hashTreeRoot(Sha256, &cached, std.testing.allocator);
+
+    try expect(std.mem.eql(u8, &cached, &uncached));
+
+    // Modify one element and verify cached recompute matches fresh uncached
+    try list.set(1, 42);
+
+    var cached2: [32]u8 = undefined;
+    try list.hashTreeRoot(Sha256, &cached2, std.testing.allocator);
+
+    // Build a fresh list with same data for comparison
+    var fresh = try ListU64.init(std.testing.allocator);
+    defer fresh.deinit();
+    try fresh.append(1);
+    try fresh.append(42);
+    try fresh.append(3);
+
+    var expected: [32]u8 = undefined;
+    try hashTreeRoot(Sha256, ListU64, fresh, &expected, std.testing.allocator);
+
+    try expect(std.mem.eql(u8, &cached2, &expected));
+
+    // Verify it differs from original
+    try expect(!std.mem.eql(u8, &cached2, &uncached));
+}
+
+test "Cached hashTreeRoot for List with append" {
+    const ListU64 = utils.List(u64, 1024);
+    var list = try ListU64.init(std.testing.allocator);
+    defer list.deinit();
+
+    try list.append(10);
+
+    var hash1: [32]u8 = undefined;
+    try list.hashTreeRoot(Sha256, &hash1, std.testing.allocator);
+
+    // Append and recompute
+    try list.append(20);
+    var hash2: [32]u8 = undefined;
+    try list.hashTreeRoot(Sha256, &hash2, std.testing.allocator);
+
+    // Compare with fresh uncached
+    var fresh = try ListU64.init(std.testing.allocator);
+    defer fresh.deinit();
+    try fresh.append(10);
+    try fresh.append(20);
+
+    var expected: [32]u8 = undefined;
+    try hashTreeRoot(Sha256, ListU64, fresh, &expected, std.testing.allocator);
+
+    try expect(std.mem.eql(u8, &hash2, &expected));
+    try expect(!std.mem.eql(u8, &hash1, &hash2));
+}
+
+test "Cached hashTreeRoot for composite List" {
+    const Point = struct { x: u32, y: u32 };
+    const ListOfPoint = utils.List(Point, 100);
+
+    var list = try ListOfPoint.init(std.testing.allocator);
+    defer list.deinit();
+
+    try list.append(.{ .x = 1, .y = 2 });
+    try list.append(.{ .x = 3, .y = 4 });
+
+    var cached: [32]u8 = undefined;
+    try list.hashTreeRoot(Sha256, &cached, std.testing.allocator);
+
+    var uncached: [32]u8 = undefined;
+    try hashTreeRoot(Sha256, ListOfPoint, list, &uncached, std.testing.allocator);
+
+    try expect(std.mem.eql(u8, &cached, &uncached));
+}
+
+test "Cached hashTreeRoot for Bitlist matches uncached" {
+    const TestBitlist = utils.Bitlist(256);
+    var bl = try TestBitlist.init(std.testing.allocator);
+    defer bl.deinit();
+
+    try bl.append(true);
+    try bl.append(false);
+    try bl.append(true);
+    try bl.append(true);
+
+    // Uncached
+    var uncached: [32]u8 = undefined;
+    try hashTreeRoot(Sha256, TestBitlist, bl, &uncached, std.testing.allocator);
+
+    var cached: [32]u8 = undefined;
+    try bl.hashTreeRoot(Sha256, &cached, std.testing.allocator);
+
+    try expect(std.mem.eql(u8, &cached, &uncached));
+
+    // Modify a bit and verify incremental update
+    try bl.set(1, true);
+    var cached2: [32]u8 = undefined;
+    try bl.hashTreeRoot(Sha256, &cached2, std.testing.allocator);
+
+    // Fresh comparison
+    var fresh = try TestBitlist.init(std.testing.allocator);
+    defer fresh.deinit();
+    try fresh.append(true);
+    try fresh.append(true);
+    try fresh.append(true);
+    try fresh.append(true);
+
+    var expected: [32]u8 = undefined;
+    try hashTreeRoot(Sha256, TestBitlist, fresh, &expected, std.testing.allocator);
+
+    try expect(std.mem.eql(u8, &cached2, &expected));
+    try expect(!std.mem.eql(u8, &cached2, &uncached));
+}
+
 test {
     _ = @import("beacon_tests.zig");
+    _ = @import("merkle_cache.zig");
 }

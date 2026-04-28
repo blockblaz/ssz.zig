@@ -880,6 +880,26 @@ fn packBits(bits: []const bool, l: *ArrayList(u8), allocator: Allocator) ![]chun
 pub fn hashTreeRoot(Hasher: type, T: type, value: T, out: *[Hasher.digest_length]u8, allocator: Allocator) !void {
     // Check if type has its own hashTreeRoot method at compile time
     if (comptime std.meta.hasFn(T, "hashTreeRoot")) {
+        // value is a by-value copy; if hashTreeRoot lazily allocates a new cache
+        // on this copy, we must free it to prevent leaks. But if the original
+        // already had a cache (shallow-copied into value), we must not free it.
+        const has_optional_cache = comptime blk: {
+            if (!std.meta.hasFn(T, "deinitCache")) break :blk false;
+            if (!@hasField(T, "cache")) break :blk false;
+            break :blk @typeInfo(@FieldType(T, "cache")) == .optional;
+        };
+        if (has_optional_cache) {
+            const cache_before = value.cache;
+            var mutable = value;
+            errdefer if (cache_before == null and mutable.cache != null) {
+                mutable.deinitCache();
+            };
+            try mutable.hashTreeRoot(Hasher, out, allocator);
+            if (cache_before == null and mutable.cache != null) {
+                mutable.deinitCache();
+            }
+            return;
+        }
         return value.hashTreeRoot(Hasher, out, allocator);
     }
 

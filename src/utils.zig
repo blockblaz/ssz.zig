@@ -8,6 +8,7 @@ const isFixedSizeObject = lib.isFixedSizeObject;
 const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;
 const hashes_of_zero = @import("./zeros.zig").hashes_of_zero;
+const merkle_cache = @import("./merkle_cache.zig");
 
 // SSZ specification constants
 const BYTES_PER_CHUNK = 32;
@@ -30,6 +31,12 @@ pub fn List(T: type, comptime N: usize) type {
 
         inner: Inner,
         allocator: Allocator,
+        cache: ?*CacheType = null,
+
+        /// Hasher-agnostic cache type. We use SHA256 as the default since that's the
+        /// standard SSZ hasher, but the cache is only used when hashTreeRoot is called
+        /// with a matching hasher.
+        const CacheType = merkle_cache.MerkleCache(std.crypto.hash.sha2.Sha256);
 
         pub fn sszEncode(self: *const Self, l: *ArrayList(u8), allocator: Allocator) !void {
             try serialize([]const Item, self.constSlice(), l, allocator);
@@ -120,16 +127,18 @@ pub fn List(T: type, comptime N: usize) type {
         }
 
         pub fn deinit(self: *Self) void {
+            if (self.cache) |c| {
+                c.deinit(self.allocator);
+                self.allocator.destroy(c);
+                self.cache = null;
+            }
             self.inner.deinit(self.allocator);
         }
 
         pub fn append(self: *Self, item: Self.Item) error{ Overflow, OutOfMemory }!void {
             if (self.inner.items.len >= N) return error.Overflow;
-            return self.inner.append(self.allocator, item);
-        }
-
-        pub fn slice(self: *Self) []T {
-            return self.inner.items;
+            try self.inner.append(self.allocator, item);
+            self.invalidateCacheForIndex(self.inner.items.len - 1);
         }
 
         pub fn constSlice(self: *const Self) []const T {
@@ -151,6 +160,7 @@ pub fn List(T: type, comptime N: usize) type {
         pub fn set(self: *Self, i: usize, item: T) error{IndexOutOfBounds}!void {
             if (i >= self.inner.items.len) return error.IndexOutOfBounds;
             self.inner.items[i] = item;
+            self.invalidateCacheForIndex(i);
         }
 
         pub fn len(self: *const Self) usize {
@@ -163,6 +173,29 @@ pub fn List(T: type, comptime N: usize) type {
         }
 
         pub fn hashTreeRoot(self: *const Self, Hasher: type, out: *[32]u8, allocator: Allocator) !void {
+            if (Hasher == std.crypto.hash.sha2.Sha256) {
+                // Lazily initialize cache using self.allocator for consistent ownership
+                if (self.cache == null) {
+                    const limit = switch (@typeInfo(Item)) {
+                        .int => blk: {
+                            const bytes_per_item = @sizeOf(Item);
+                            const items_per_chunk = BYTES_PER_CHUNK / bytes_per_item;
+                            break :blk (N + items_per_chunk - 1) / items_per_chunk;
+                        },
+                        else => N,
+                    };
+                    const c = try self.allocator.create(CacheType);
+                    errdefer self.allocator.destroy(c);
+                    c.* = try CacheType.init(self.allocator, limit);
+                    @constCast(&self.cache).* = c;
+                }
+                return self.hashTreeRootCached(out, allocator);
+            }
+
+            return self.hashTreeRootUncached(Hasher, out, allocator);
+        }
+
+        fn hashTreeRootUncached(self: *const Self, Hasher: type, out: *[32]u8, allocator: Allocator) !void {
             const items = self.constSlice();
 
             switch (@typeInfo(Item)) {
@@ -186,11 +219,115 @@ pub fn List(T: type, comptime N: usize) type {
                         try lib.hashTreeRoot(Hasher, Item, item, &tmp, allocator);
                         try chunks.append(allocator, tmp);
                     }
-                    // Always use N (max capacity) for merkleization, even when empty
-                    // This ensures proper tree depth according to SSZ specification
                     try lib.merkleize(Hasher, chunks.items, N, &tmp);
                     lib.mixInLength2(Hasher, tmp, items.len, out);
                 },
+            }
+        }
+
+        /// Free the Merkle cache without freeing the list itself.
+        /// Called by lib.hashTreeRoot to clean up caches on value copies.
+        pub fn deinitCache(self: *Self) void {
+            if (self.cache) |c| {
+                c.deinit(self.allocator);
+                self.allocator.destroy(c);
+                self.cache = null;
+            }
+        }
+
+        fn hashTreeRootCached(self: *const Self, out: *[32]u8, allocator: Allocator) !void {
+            const Sha256 = std.crypto.hash.sha2.Sha256;
+            const items = self.constSlice();
+            const cache = self.cache.?;
+
+            switch (@typeInfo(Item)) {
+                .int => {
+                    // Pack items into chunks and update dirty leaves
+                    const bytes_per_item = @sizeOf(Item);
+                    const items_per_chunk = BYTES_PER_CHUNK / bytes_per_item;
+                    const chunks_for_max_capacity = (N + items_per_chunk - 1) / items_per_chunk;
+
+                    if (!cache.initialized) {
+                        // First time: set all leaf chunks
+                        for (0..items.len) |i| {
+                            const chunk_idx = i / items_per_chunk;
+                            const pos_in_chunk = (i % items_per_chunk) * bytes_per_item;
+                            var leaf = cache.nodes[cache.capacity + chunk_idx];
+                            // SSZ requires little-endian encoding
+                            std.mem.writeInt(Item, leaf[pos_in_chunk..][0..bytes_per_item], items[i], .little);
+                            cache.nodes[cache.capacity + chunk_idx] = leaf;
+                        }
+                        cache.markAllDirty();
+                    }
+                    // For dirty chunks, rebuild from current items
+                    if (cache.dirty_low <= cache.dirty_high) {
+                        const lo = cache.dirty_low;
+                        const hi = @min(cache.dirty_high, if (items.len > 0) (items.len - 1) / items_per_chunk else 0);
+                        for (lo..hi + 1) |chunk_idx| {
+                            var leaf: chunk = zero_chunk;
+                            const start_item = chunk_idx * items_per_chunk;
+                            const end_item = @min(start_item + items_per_chunk, items.len);
+                            for (start_item..end_item) |item_i| {
+                                const pos = (item_i % items_per_chunk) * bytes_per_item;
+                                // SSZ requires little-endian encoding
+                                std.mem.writeInt(Item, leaf[pos..][0..bytes_per_item], items[item_i], .little);
+                            }
+                            cache.nodes[cache.capacity + chunk_idx] = leaf;
+                        }
+                        // Zero out chunks beyond data
+                        for ((if (items.len > 0) (items.len - 1) / items_per_chunk + 1 else 0)..chunks_for_max_capacity) |chunk_idx| {
+                            if (chunk_idx >= cache.dirty_low and chunk_idx <= cache.dirty_high) {
+                                cache.nodes[cache.capacity + chunk_idx] = zero_chunk;
+                            }
+                        }
+                    }
+
+                    const num_data_chunks = if (items.len > 0) (items.len - 1) / items_per_chunk + 1 else 0;
+                    out.* = cache.recomputeWithLength(num_data_chunks, items.len);
+                },
+                else => {
+                    // Composite types: each item is its own chunk (hash tree root of item)
+                    // Composite items may contain pointers to mutable data that
+                    // can change without going through set(), so we must always
+                    // recompute all item hashes. We compare against cached leaves
+                    // to only mark actually-changed nodes dirty for tree rehashing.
+                    var tmp: chunk = undefined;
+                    for (items, 0..) |item, i| {
+                        try lib.hashTreeRoot(Sha256, Item, item, &tmp, allocator);
+                        if (!std.mem.eql(u8, &tmp, &cache.nodes[cache.capacity + i])) {
+                            cache.nodes[cache.capacity + i] = tmp;
+                            cache.markDirty(i);
+                        }
+                    }
+                    // Zero out any previously-occupied slots beyond current length
+                    if (cache.initialized) {
+                        for (items.len..cache.capacity) |i| {
+                            if (!std.mem.eql(u8, &zero_chunk, &cache.nodes[cache.capacity + i])) {
+                                cache.nodes[cache.capacity + i] = zero_chunk;
+                                cache.markDirty(i);
+                            }
+                        }
+                    } else {
+                        cache.markAllDirty();
+                    }
+
+                    out.* = cache.recomputeWithLength(items.len, items.len);
+                },
+            }
+        }
+
+        /// Compute the chunk index for a given element index and mark it dirty in the cache.
+        fn invalidateCacheForIndex(self: *Self, element_index: usize) void {
+            if (self.cache) |cache| {
+                const chunk_idx = switch (@typeInfo(Item)) {
+                    .int => blk: {
+                        const bytes_per_item = @sizeOf(Item);
+                        const items_per_chunk = BYTES_PER_CHUNK / bytes_per_item;
+                        break :blk element_index / items_per_chunk;
+                    },
+                    else => element_index,
+                };
+                cache.markDirty(chunk_idx);
             }
         }
 
@@ -228,6 +365,9 @@ pub fn Bitlist(comptime N: usize) type {
         inner: Inner,
         allocator: Allocator,
         length: usize,
+        cache: ?*BitCacheType = null,
+
+        const BitCacheType = merkle_cache.MerkleCache(std.crypto.hash.sha2.Sha256);
 
         pub fn sszEncode(self: *const Self, l: *ArrayList(u8), allocator: Allocator) !void {
             if (self.length == 0) {
@@ -315,6 +455,7 @@ pub fn Bitlist(comptime N: usize) type {
             const mask = ~@shlExact(@as(u8, 1), @truncate(i % 8));
             const b = if (bit) @shlExact(@as(u8, 1), @truncate(i % 8)) else 0;
             self.inner.items[i / 8] = @truncate((self.inner.items[i / 8] & mask) | b);
+            if (self.cache) |c| c.markDirty(i / 256);
         }
 
         pub fn append(self: *Self, item: bool) error{ Overflow, OutOfMemory, IndexOutOfBounds }!void {
@@ -331,6 +472,11 @@ pub fn Bitlist(comptime N: usize) type {
         }
 
         pub fn deinit(self: *Self) void {
+            if (self.cache) |c| {
+                c.deinit(self.allocator);
+                self.allocator.destroy(c);
+                self.cache = null;
+            }
             self.inner.deinit(self.allocator);
         }
 
@@ -344,34 +490,89 @@ pub fn Bitlist(comptime N: usize) type {
         }
 
         pub fn hashTreeRoot(self: *const Self, Hasher: type, out: *[32]u8, allocator: Allocator) !void {
+            if (Hasher == std.crypto.hash.sha2.Sha256) {
+                // Lazily initialize cache using self.allocator for consistent ownership
+                if (self.cache == null) {
+                    const chunk_count_limit = (N + 255) / 256;
+                    const c = try self.allocator.create(BitCacheType);
+                    errdefer self.allocator.destroy(c);
+                    c.* = try BitCacheType.init(self.allocator, chunk_count_limit);
+                    @constCast(&self.cache).* = c;
+                }
+                return self.hashTreeRootCached(out);
+            }
+            return self.hashTreeRootUncached(Hasher, out, allocator);
+        }
+
+        fn hashTreeRootUncached(self: *const Self, Hasher: type, out: *[32]u8, allocator: Allocator) !void {
             const bit_length = self.length;
 
             var bitfield_bytes: ArrayList(u8) = .empty;
             defer bitfield_bytes.deinit(allocator);
 
             if (bit_length > 0) {
-                // Get the internal bit data since we don't store delimiter
                 const sl = self.inner.items;
                 try bitfield_bytes.appendSlice(allocator, sl[0..sl.len]);
 
-                // Remove trailing zeros but keep at least one byte
-                // This avoids the wasteful pattern of removing all zeros then adding back a chunk
                 while (bitfield_bytes.items.len > 1 and bitfield_bytes.items[bitfield_bytes.items.len - 1] == 0) {
                     _ = bitfield_bytes.pop();
                 }
             }
 
-            // Pack bits into chunks (pad to chunk boundary)
             const padding_size = (BYTES_PER_CHUNK - bitfield_bytes.items.len % BYTES_PER_CHUNK) % BYTES_PER_CHUNK;
             _ = try bitfield_bytes.appendSlice(allocator, zero_chunk[0..padding_size]);
 
             const chunks = std.mem.bytesAsSlice(chunk, bitfield_bytes.items);
             var tmp: chunk = undefined;
 
-            // Use chunk_count limit as per SSZ specification
             const chunk_count_limit = (N + 255) / 256;
             try lib.merkleize(Hasher, chunks, chunk_count_limit, &tmp);
             lib.mixInLength2(Hasher, tmp, bit_length, out);
+        }
+
+        fn hashTreeRootCached(self: *const Self, out: *[32]u8) void {
+            const cache = self.cache.?;
+            const bit_length = self.length;
+
+            // Update dirty leaf chunks from current bit data
+            if (!cache.initialized) {
+                // Set all leaf chunks from bit data
+                const sl = self.inner.items;
+                const num_data_chunks = if (sl.len > 0) (sl.len - 1) / BYTES_PER_CHUNK + 1 else 0;
+                for (0..num_data_chunks) |ci| {
+                    var leaf: chunk = zero_chunk;
+                    const start = ci * BYTES_PER_CHUNK;
+                    const end = @min(start + BYTES_PER_CHUNK, sl.len);
+                    @memcpy(leaf[0 .. end - start], sl[start..end]);
+                    cache.nodes[cache.capacity + ci] = leaf;
+                }
+                cache.markAllDirty();
+            } else if (cache.dirty_low <= cache.dirty_high) {
+                const sl = self.inner.items;
+                const hi = @min(cache.dirty_high, if (sl.len > 0) (sl.len - 1) / BYTES_PER_CHUNK else 0);
+                for (cache.dirty_low..hi + 1) |ci| {
+                    var leaf: chunk = zero_chunk;
+                    const start = ci * BYTES_PER_CHUNK;
+                    const end = @min(start + BYTES_PER_CHUNK, sl.len);
+                    if (start < sl.len) {
+                        @memcpy(leaf[0 .. end - start], sl[start..end]);
+                    }
+                    cache.nodes[cache.capacity + ci] = leaf;
+                }
+            }
+
+            const num_data_chunks = if (self.inner.items.len > 0) (self.inner.items.len - 1) / BYTES_PER_CHUNK + 1 else 0;
+            out.* = cache.recomputeWithLength(num_data_chunks, bit_length);
+        }
+
+        /// Free the Merkle cache without freeing the bitlist itself.
+        /// Called by lib.hashTreeRoot to clean up caches on value copies.
+        pub fn deinitCache(self: *Self) void {
+            if (self.cache) |c| {
+                c.deinit(self.allocator);
+                self.allocator.destroy(c);
+                self.cache = null;
+            }
         }
 
         /// Validates that the bitlist is correctly formed

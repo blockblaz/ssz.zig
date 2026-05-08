@@ -71,7 +71,9 @@ pub fn List(T: type, comptime N: usize) type {
                 @panic("Use the optimized utils.Bitlist(N) instead of utils.List(bool, N)");
             } else if (try lib.isFixedSizeObject(Self.Item)) {
                 const pitch = try lib.serializedFixedSize(Self.Item);
+                if (serialized.len % pitch != 0) return error.OffsetOrdering;
                 const n_items = serialized.len / pitch;
+                if (n_items > N) return error.OffsetExceedsSize;
 
                 for (0..n_items) |i| {
                     var item: Self.Item = undefined;
@@ -81,15 +83,18 @@ pub fn List(T: type, comptime N: usize) type {
             } else {
                 // Validate and decode dynamic list length
                 const size = try Self.decodeDynamicLength(serialized);
+                const prefix_len = @as(usize, size) * 4;
+                if (prefix_len > serialized.len) return error.OffsetExceedsSize;
 
-                const indices = std.mem.bytesAsSlice(u32, serialized[0 .. size * 4]);
+                const indices = std.mem.bytesAsSlice(u32, serialized[0..prefix_len]);
                 var i = @as(usize, 0);
                 while (i < size) : (i += 1) {
                     const end = if (i < size - 1) indices[i + 1] else serialized.len;
                     const start = indices[i];
-                    if (start >= serialized.len or end > serialized.len) {
+                    if (start > serialized.len or end > serialized.len) {
                         return error.OffsetExceedsSize;
                     }
+                    if (start > end) return error.OffsetOrdering;
                     if (i > 0 and start < indices[i - 1]) {
                         return error.OffsetOrdering;
                     }

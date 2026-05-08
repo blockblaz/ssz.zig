@@ -2300,6 +2300,30 @@ test "roundtrip: [2][4]u32 (nested fixed array) preserves inner elements" {
     try expect(std.mem.eql(u32, &out[1], &.{ 5, 6, 7, 8 }));
 }
 
+test "deserialize struct: invalid first var offset returns error (no slice panic)" {
+    const S = struct {
+        a: u32,
+        b: []const u8,
+    };
+    // Fixed prefix 4 bytes; claimed offset for `b` is past the buffer (Hive-style garbage).
+    const malformed = [_]u8{ 0, 0, 0, 0, 0xab, 0xaa, 0xab, 0xab };
+    var out: S = undefined;
+    try expectError(error.OffsetExceedsSize, deserialize(S, &malformed, &out, std.testing.allocator));
+}
+
+test "deserialize struct: offset past buffer returns OffsetExceedsSize" {
+    const S = struct {
+        a: u32,
+        b: []const u8,
+    };
+    var buf: [12]u8 = undefined;
+    buf[0..4].* = @as([4]u8, @bitCast(@as(u32, 0)));
+    buf[4..8].* = @as([4]u8, @bitCast(@as(u32, 100)));
+    buf[8..12].* = .{ 0, 0, 0, 0 };
+    var out: S = undefined;
+    try expectError(error.OffsetExceedsSize, deserialize(S, &buf, &out, std.testing.allocator));
+}
+
 test {
     _ = @import("beacon_tests.zig");
 }

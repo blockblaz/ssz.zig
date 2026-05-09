@@ -2324,6 +2324,150 @@ test "deserialize struct: offset past buffer returns OffsetExceedsSize" {
     try expectError(error.OffsetExceedsSize, deserialize(S, &buf, &out, std.testing.allocator));
 }
 
+test "deserialize struct: fixed-field read past buffer" {
+    const S = struct {
+        a: u32,
+        b: u32,
+        c: []const u8,
+    };
+    const buf = [_]u8{0} ** 10;
+    var out: S = undefined;
+    try expectError(error.OffsetExceedsSize, deserialize(S, &buf, &out, std.testing.allocator));
+}
+
+test "deserialize struct: nested variable container truncated in outer slice" {
+    const Inner = struct {
+        x: u32,
+        y: []const u8,
+    };
+    const S = struct {
+        a: Inner,
+    };
+    // Outer: u32 offset to `a` at 4; inner blob is 5 bytes (too short for u32 + offset u32).
+    var buf: [9]u8 = undefined;
+    std.mem.writeInt(u32, buf[0..4], 4, .little);
+    @memset(buf[4..9], 0);
+    var out: S = undefined;
+    try expectError(error.OffsetExceedsSize, deserialize(S, &buf, &out, std.testing.allocator));
+}
+
+test "deserialize struct: first variable slice must start after offset table" {
+    const S = struct {
+        a: u32,
+        b: []const u8,
+    };
+    var buf: [16]u8 = undefined;
+    std.mem.writeInt(u32, buf[0..4], 0, .little);
+    std.mem.writeInt(u32, buf[4..8], 4, .little);
+    @memset(buf[8..16], 0);
+    var out: S = undefined;
+    try expectError(error.OffsetOrdering, deserialize(S, &buf, &out, std.testing.allocator));
+}
+
+test "deserialize struct: variable slice end before start" {
+    const S = struct {
+        a: u32,
+        b: []const u8,
+        c: []const u8,
+    };
+    var buf: [24]u8 = undefined;
+    std.mem.writeInt(u32, buf[0..4], 0, .little);
+    std.mem.writeInt(u32, buf[4..8], 12, .little);
+    std.mem.writeInt(u32, buf[8..12], 10, .little);
+    @memset(buf[12..24], 0);
+    var out: S = undefined;
+    try expectError(error.OffsetOrdering, deserialize(S, &buf, &out, std.testing.allocator));
+}
+
+test "deserialize struct: third variable offset before second" {
+    const S = struct {
+        a: u32,
+        b: []const u8,
+        c: []const u8,
+        d: []const u8,
+    };
+    var buf: [32]u8 = undefined;
+    std.mem.writeInt(u32, buf[0..4], 0, .little);
+    std.mem.writeInt(u32, buf[4..8], 16, .little);
+    std.mem.writeInt(u32, buf[8..12], 24, .little);
+    std.mem.writeInt(u32, buf[12..16], 23, .little);
+    @memset(buf[16..32], 0xaa);
+    var out: S = undefined;
+    try expectError(error.OffsetOrdering, deserialize(S, &buf, &out, std.testing.allocator));
+}
+
+test "deserialize variable array: misaligned offset prefix" {
+    var out: [1][]const u8 = undefined;
+    const buf = [_]u8{ 6, 0, 0, 0 };
+    try expectError(error.OffsetAlignment, deserialize([1][]const u8, &buf, &out, std.testing.allocator));
+}
+
+test "deserialize variable array: offset prefix exceeds buffer" {
+    var out: [1][]const u8 = undefined;
+    const buf = [_]u8{ 8, 0, 0, 0 };
+    try expectError(error.OffsetExceedsSize, deserialize([1][]const u8, &buf, &out, std.testing.allocator));
+}
+
+test "deserialize variable array: decreasing offsets in table" {
+    var out: [2][]const u8 = undefined;
+    var buf: [8]u8 = undefined;
+    // First word is offset-prefix length (8 bytes = two u32s); second word is end of first span (invalid < 8).
+    std.mem.writeInt(u32, buf[0..4], 8, .little);
+    std.mem.writeInt(u32, buf[4..8], 4, .little);
+    try expectError(error.OffsetOrdering, deserialize([2][]const u8, &buf, &out, std.testing.allocator));
+}
+
+test "deserialize variable slice of slices: zero first offset" {
+    var out: [][]const u8 = undefined;
+    const buf = [_]u8{ 0, 0, 0, 0 };
+    try expectError(error.OffsetAlignment, deserialize([][]const u8, &buf, &out, std.testing.allocator));
+}
+
+test "deserialize variable slice of slices: misaligned first offset" {
+    var out: [][]const u8 = undefined;
+    var buf: [8]u8 = undefined;
+    std.mem.writeInt(u32, buf[0..4], 6, .little);
+    @memset(buf[4..8], 0);
+    try expectError(error.OffsetAlignment, deserialize([][]const u8, buf[0..], &out, std.testing.allocator));
+}
+
+test "deserialize variable slice of slices: second offset out of buffer" {
+    var out: [][]const u8 = undefined;
+    var buf: [8]u8 = undefined;
+    std.mem.writeInt(u32, buf[0..4], 8, .little);
+    std.mem.writeInt(u32, buf[4..8], 100, .little);
+    try expectError(error.OffsetExceedsSize, deserialize([][]const u8, buf[0..], &out, std.testing.allocator));
+}
+
+test "deserialize tagged union: empty buffer hits union guard when minInLength is 0" {
+    const U = union(enum) {
+        a: u32,
+        b: u8,
+
+        pub fn minInLength() usize {
+            return 0;
+        }
+    };
+    var out: U = undefined;
+    try expectError(error.OffsetExceedsSize, deserialize(U, &.{}, &out, null));
+}
+
+test "utils.List fixed-size item: ragged serialized length" {
+    const L = utils.List(u64, 4);
+    var out: L = undefined;
+    defer out.deinit();
+    const buf = [_]u8{0} ** 9;
+    try expectError(error.OffsetOrdering, L.sszDecode(buf[0..], &out, std.testing.allocator));
+}
+
+test "utils.List fixed-size item: element count exceeds N" {
+    const L = utils.List(u64, 2);
+    var out: L = undefined;
+    defer out.deinit();
+    const buf = [_]u8{0} ** 24;
+    try expectError(error.OffsetExceedsSize, L.sszDecode(buf[0..], &out, std.testing.allocator));
+}
+
 test {
     _ = @import("beacon_tests.zig");
 }

@@ -459,10 +459,9 @@ pub fn deserialize(T: type, serialized: []const u8, out: *T, allocator: ?Allocat
                     // first variable index is also the size of the list
                     // of indices. Recast that list as a []const u32.
                     if (serialized.len < 4) return error.OffsetExceedsSize;
-                    const offset_prefix = std.mem.readInt(u32, serialized[0..4], std.builtin.Endian.little);
-                    if (offset_prefix % @sizeOf(u32) != 0) return error.OffsetOrdering;
+                    const offset_prefix = std.mem.readInt(u32, serialized[0..4], .little);
+                    if (offset_prefix % @sizeOf(u32) != 0) return error.OffsetAlignment;
                     const size = offset_prefix / @sizeOf(u32);
-                    if (size > serialized.len / @sizeOf(u32)) return error.OffsetExceedsSize;
                     if (offset_prefix > serialized.len) return error.OffsetExceedsSize;
                     const indices = std.mem.bytesAsSlice(u32, serialized[0..offset_prefix]);
                     var i = @as(usize, 0);
@@ -522,17 +521,17 @@ pub fn deserialize(T: type, serialized: []const u8, out: *T, allocator: ?Allocat
                     // read the first index, determine when the "variable size" list ends,
                     // and determine the size of the item as a result.
                     if (serialized.len < 4) return error.OffsetExceedsSize;
-                    const first_offset_u32 = std.mem.readInt(u32, serialized[0..4], std.builtin.Endian.little);
+                    const first_offset_u32 = std.mem.readInt(u32, serialized[0..4], .little);
                     const first_offset = @as(usize, first_offset_u32);
                     if (first_offset > serialized.len) return error.OffsetExceedsSize;
-                    if (first_offset % @sizeOf(u32) != 0) return error.OffsetOrdering;
+                    if (first_offset % @sizeOf(u32) != 0) return error.OffsetAlignment;
                     const n_items = first_offset / @sizeOf(u32);
-                    if (n_items == 0) return error.OffsetOrdering;
+                    if (n_items == 0) return error.OffsetAlignment;
 
                     var offset: usize = first_offset;
                     var next_offset: usize = if (n_items == 1) serialized.len else blk: {
                         if (serialized.len < 8) return error.OffsetExceedsSize;
-                        const n = std.mem.readInt(u32, serialized[4..8], std.builtin.Endian.little);
+                        const n = std.mem.readInt(u32, serialized[4..8], .little);
                         break :blk @as(usize, n);
                     };
                     if (next_offset > serialized.len) return error.OffsetExceedsSize;
@@ -551,7 +550,7 @@ pub fn deserialize(T: type, serialized: []const u8, out: *T, allocator: ?Allocat
                         else blk: {
                             const rel = (i + 2) * 4;
                             if (rel + 4 > serialized.len) return error.OffsetExceedsSize;
-                            const n = std.mem.readInt(u32, serialized[rel..][0..4], std.builtin.Endian.little);
+                            const n = std.mem.readInt(u32, serialized[rel..][0..4], .little);
                             break :blk @as(usize, n);
                         };
                         if (next_offset > serialized.len) return error.OffsetExceedsSize;

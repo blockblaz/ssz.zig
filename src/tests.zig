@@ -2468,6 +2468,112 @@ test "utils.List fixed-size item: element count exceeds N" {
     try expectError(error.OffsetExceedsSize, L.sszDecode(buf[0..], &out, std.testing.allocator));
 }
 
+test "deserialize variable array: buffer smaller than offset prefix" {
+    var out: [1][]const u8 = undefined;
+    const buf = [_]u8{0} ** 3;
+    try expectError(error.OffsetExceedsSize, deserialize([1][]const u8, &buf, &out, std.testing.allocator));
+}
+
+test "deserialize variable array: offset in table past buffer" {
+    var out: [2][]const u8 = undefined;
+    var buf: [8]u8 = undefined;
+    std.mem.writeInt(u32, buf[0..4], 8, .little);
+    std.mem.writeInt(u32, buf[4..8], 12, .little);
+    try expectError(error.OffsetExceedsSize, deserialize([2][]const u8, &buf, &out, std.testing.allocator));
+}
+
+test "deserialize variable slice of slices: buffer smaller than first offset slot" {
+    var out: [][]const u8 = undefined;
+    const buf = [_]u8{0} ** 3;
+    try expectError(error.OffsetExceedsSize, deserialize([][]const u8, &buf, &out, std.testing.allocator));
+}
+
+test "deserialize variable slice of slices: first offset exceeds buffer" {
+    var out: [][]const u8 = undefined;
+    const buf = [_]u8{ 100, 0, 0, 0 };
+    try expectError(error.OffsetExceedsSize, deserialize([][]const u8, &buf, &out, std.testing.allocator));
+}
+
+test "deserialize variable slice of slices: first offset greater than second" {
+    var out: [][]const u8 = undefined;
+    var buf: [8]u8 = undefined;
+    std.mem.writeInt(u32, buf[0..4], 8, .little);
+    std.mem.writeInt(u32, buf[4..8], 4, .little);
+    try expectError(error.OffsetOrdering, deserialize([][]const u8, &buf, &out, std.testing.allocator));
+}
+
+test "deserialize variable slice of slices: later offset past buffer" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var out: [][]const u8 = undefined;
+    var buf: [16]u8 = undefined;
+    std.mem.writeInt(u32, buf[0..4], 12, .little);
+    std.mem.writeInt(u32, buf[4..8], 16, .little);
+    std.mem.writeInt(u32, buf[8..12], 100, .little);
+    @memset(buf[12..16], 0);
+    try expectError(error.OffsetExceedsSize, deserialize([][]const u8, &buf, &out, arena.allocator()));
+}
+
+test "deserialize variable slice of slices: later offset decreases" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var out: [][]const u8 = undefined;
+    var buf: [20]u8 = undefined;
+    std.mem.writeInt(u32, buf[0..4], 12, .little);
+    std.mem.writeInt(u32, buf[4..8], 16, .little);
+    std.mem.writeInt(u32, buf[8..12], 14, .little);
+    @memset(buf[12..20], 0);
+    try expectError(error.OffsetOrdering, deserialize([][]const u8, &buf, &out, arena.allocator()));
+}
+
+test "deserialize struct: bool/int field truncated below @sizeOf" {
+    const S = struct {
+        a: u32,
+        b: []const u8,
+    };
+    const buf = [_]u8{0} ** 3;
+    var out: S = undefined;
+    try expectError(error.OffsetExceedsSize, deserialize(S, &buf, &out, std.testing.allocator));
+}
+
+test "deserialize struct: fixed-size composite field truncated" {
+    const S = struct {
+        a: [4]u32,
+        b: []const u8,
+    };
+    const buf = [_]u8{0} ** 10;
+    var out: S = undefined;
+    try expectError(error.OffsetExceedsSize, deserialize(S, &buf, &out, std.testing.allocator));
+}
+
+test "utils.List dynamic-item: offset prefix exceeds buffer" {
+    const L = utils.List([]const u8, 4);
+    var out: L = undefined;
+    defer out.deinit();
+    const buf = [_]u8{ 8, 0, 0, 0 };
+    try expectError(error.OffsetExceedsSize, L.sszDecode(&buf, &out, std.testing.allocator));
+}
+
+test "utils.List dynamic-item: offset in table past buffer" {
+    const L = utils.List([]const u8, 4);
+    var out: L = undefined;
+    defer out.deinit();
+    var buf: [8]u8 = undefined;
+    std.mem.writeInt(u32, buf[0..4], 8, .little);
+    std.mem.writeInt(u32, buf[4..8], 100, .little);
+    try expectError(error.OffsetExceedsSize, L.sszDecode(&buf, &out, std.testing.allocator));
+}
+
+test "utils.List dynamic-item: offsets decrease" {
+    const L = utils.List([]const u8, 4);
+    var out: L = undefined;
+    defer out.deinit();
+    var buf: [8]u8 = undefined;
+    std.mem.writeInt(u32, buf[0..4], 8, .little);
+    std.mem.writeInt(u32, buf[4..8], 4, .little);
+    try expectError(error.OffsetOrdering, L.sszDecode(&buf, &out, std.testing.allocator));
+}
+
 test {
     _ = @import("beacon_tests.zig");
 }

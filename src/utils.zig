@@ -68,7 +68,7 @@ pub fn List(T: type, comptime N: usize) type {
             }
 
             if (Self.Item == bool) {
-                @panic("Use the optimized utils.Bitlist(N) instead of utils.List(bool, N)");
+                @compileError("Use the optimized utils.Bitlist(N) instead of utils.List(bool, N)");
             } else if (try lib.isFixedSizeObject(Self.Item)) {
                 const pitch = try lib.serializedFixedSize(Self.Item);
                 if (serialized.len % pitch != 0) return error.OffsetOrdering;

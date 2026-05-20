@@ -297,7 +297,7 @@ pub fn serialize(T: type, data: T, l: *ArrayList(u8), allocator: Allocator) !voi
             switch (pointer.size) {
                 .slice => {
                     if (pointer.child == bool) {
-                        @panic("use util.Bitlist instead of []bool");
+                        @compileError("use util.Bitlist instead of []bool");
                     }
                     if (@sizeOf(pointer.child) == 1) {
                         _ = try l.appendSlice(allocator, data);
@@ -623,7 +623,7 @@ pub fn deserialize(T: type, serialized: []const u8, out: *T, allocator: ?Allocat
             inline for (info.@"struct".fields) |field| {
                 // comptime fields are currently not supported, and it's not even
                 // certain that they can ever be without a change in the language.
-                if (field.is_comptime) @panic("structure contains comptime field");
+                if (field.is_comptime) @compileError("structure contains comptime field");
 
                 switch (@typeInfo(field.type)) {
                     .bool, .int => {}, // covered by the previous pass

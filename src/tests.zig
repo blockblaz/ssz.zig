@@ -14,6 +14,8 @@ const Sha256 = std.crypto.hash.sha2.Sha256;
 const zeros = @import("zeros.zig");
 const hashes_of_zero = zeros.hashes_of_zero;
 const Allocator = std.mem.Allocator;
+const clone = libssz.clone;
+const hasNoPointers = libssz.hasNoPointers;
 
 test "serializes uint8" {
     const data: u8 = 0x55;
@@ -2572,6 +2574,293 @@ test "utils.List dynamic-item: offsets decrease" {
     std.mem.writeInt(u32, buf[0..4], 8, .little);
     std.mem.writeInt(u32, buf[4..8], 4, .little);
     try expectError(error.OffsetOrdering, L.sszDecode(&buf, &out, std.testing.allocator));
+}
+
+test "clone: pointer-free value works without allocator" {
+    const S = struct {
+        n: u32,
+        bytes: [4]u8,
+        tag: enum { a, b },
+    };
+    const data = S{ .n = 42, .bytes = .{ 1, 2, 3, 4 }, .tag = .b };
+    var cloned: S = undefined;
+
+    try clone(S, data, &cloned, null);
+
+    try expect(hasNoPointers(S));
+    try expect(std.meta.eql(data, cloned));
+}
+
+test "clone: const byte slice is borrowed without allocator" {
+    const data: []const u8 = "hello";
+    var cloned: []const u8 = undefined;
+
+    try clone([]const u8, data, &cloned, null);
+
+    try expect(std.mem.eql(u8, cloned, data));
+    try expect(cloned.ptr == data.ptr);
+}
+
+test "clone: mutable slice requires allocator" {
+    const data = try std.testing.allocator.dupe(u8, "hello");
+    defer std.testing.allocator.free(data);
+    var cloned: []u8 = undefined;
+
+    try expectError(error.AllocatorRequired, clone([]u8, data, &cloned, null));
+}
+
+test "clone: mutable slice copy is independent" {
+    const data = try std.testing.allocator.dupe(u8, "hello");
+    defer std.testing.allocator.free(data);
+    var cloned: []u8 = undefined;
+
+    try clone([]u8, data, &cloned, std.testing.allocator);
+    defer std.testing.allocator.free(cloned);
+
+    cloned[0] = 'H';
+    try expect(data[0] == 'h');
+    try expect(std.mem.eql(u8, cloned, "Hello"));
+}
+
+test "clone: struct follows normal slice cleanup ownership" {
+    const S = struct {
+        a: []u8,
+        b: []const u8,
+    };
+    const a = try std.testing.allocator.dupe(u8, "left");
+    defer std.testing.allocator.free(a);
+    const data = S{ .a = a, .b = "right" };
+    var cloned: S = undefined;
+
+    try clone(S, data, &cloned, std.testing.allocator);
+    defer std.testing.allocator.free(cloned.a);
+
+    try expect(std.mem.eql(u8, cloned.a, data.a));
+    try expect(std.mem.eql(u8, cloned.b, data.b));
+    try expect(cloned.a.ptr != data.a.ptr);
+    try expect(cloned.b.ptr == data.b.ptr);
+}
+
+test "clone: single pointer is deep-copied" {
+    var value: u32 = 123;
+    const data: *u32 = &value;
+    var cloned: *u32 = undefined;
+
+    try clone(*u32, data, &cloned, std.testing.allocator);
+    defer std.testing.allocator.destroy(cloned);
+
+    try expect(cloned != data);
+    try expect(cloned.* == data.*);
+    cloned.* = 456;
+    try expect(value == 123);
+}
+
+test "clone: const single pointer is deep-copied" {
+    const value: u32 = 123;
+    const data: *const u32 = &value;
+    var cloned: *const u32 = undefined;
+
+    try clone(*const u32, data, &cloned, std.testing.allocator);
+    defer std.testing.allocator.destroy(@constCast(cloned));
+
+    try expect(cloned != data);
+    try expect(cloned.* == data.*);
+}
+
+test "clone: over-aligned single pointer preserves alignment" {
+    const data = try std.testing.allocator.alignedAlloc(u32, .fromByteUnits(16), 1);
+    defer std.testing.allocator.free(data);
+    data[0] = 0xcafebabe;
+    const ptr: *align(16) u32 = &data[0];
+    var cloned: *align(16) u32 = undefined;
+
+    try clone(*align(16) u32, ptr, &cloned, std.testing.allocator);
+    defer {
+        const cloned_slice: []align(16) u32 = @as([*]align(16) u32, @ptrCast(cloned))[0..1];
+        std.testing.allocator.free(cloned_slice);
+    }
+
+    try expect(cloned != ptr);
+    try expect(cloned.* == ptr.*);
+    try expect(@intFromPtr(cloned) % 16 == 0);
+}
+
+test "clone: optional pointer" {
+    var value: u32 = 99;
+    const some: ?*u32 = &value;
+    var cloned_some: ?*u32 = undefined;
+    var cloned_none: ?*u32 = undefined;
+
+    try clone(?*u32, some, &cloned_some, std.testing.allocator);
+    defer if (cloned_some) |ptr| std.testing.allocator.destroy(ptr);
+    try clone(?*u32, null, &cloned_none, null);
+
+    try expect(cloned_some.?.* == 99);
+    try expect(cloned_some.? != some.?);
+    try expect(cloned_none == null);
+}
+
+test "clone: sentinel-terminated slice preserves sentinel" {
+    const data = try std.testing.allocator.dupeZ(u8, "hello");
+    defer std.testing.allocator.free(data);
+    var cloned: [:0]u8 = undefined;
+
+    try clone([:0]u8, data, &cloned, std.testing.allocator);
+    defer std.testing.allocator.free(cloned);
+
+    try expect(std.mem.eql(u8, cloned, data));
+    try expect(cloned.ptr != data.ptr);
+    try expect(cloned[cloned.len] == 0);
+}
+
+test "clone: utils.List uses clone hook" {
+    const L = utils.List([]const u8, 4);
+    var data = try L.init(std.testing.allocator);
+    defer data.deinit();
+    try data.append("aa");
+    try data.append("bb");
+    var cloned: L = undefined;
+
+    try clone(L, data, &cloned, std.testing.allocator);
+    defer cloned.deinit();
+
+    try expect(cloned.len() == data.len());
+    try expect(cloned.inner.items.ptr != data.inner.items.ptr);
+    try expect(std.mem.eql(u8, (try cloned.get(0)), "aa"));
+    try expect((try cloned.get(0)).ptr == (try data.get(0)).ptr);
+}
+
+test "clone: utils.Bitlist uses clone hook" {
+    const B = utils.Bitlist(32);
+    var data = try B.init(std.testing.allocator);
+    defer data.deinit();
+    try data.append(true);
+    try data.append(false);
+    try data.append(true);
+    var cloned: B = undefined;
+
+    try clone(B, data, &cloned, std.testing.allocator);
+    defer cloned.deinit();
+
+    try expect(cloned.eql(&data));
+    try cloned.set(0, false);
+    try expect((try data.get(0)) == true);
+}
+
+test "clone: struct unwind frees earlier fields when later allocation fails" {
+    const S = struct {
+        a: []u8,
+        b: []u8,
+    };
+    const a = try std.testing.allocator.dupe(u8, "first");
+    defer std.testing.allocator.free(a);
+    const b = try std.testing.allocator.dupe(u8, "second");
+    defer std.testing.allocator.free(b);
+    const data = S{ .a = a, .b = b };
+    var cloned: S = undefined;
+
+    var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 1 });
+    try expectError(error.OutOfMemory, clone(S, data, &cloned, failing.allocator()));
+}
+
+test "clone: array of const byte slices keeps borrowed items" {
+    const data: [3][]const u8 = .{ "one", "two", "three" };
+    var cloned: [3][]const u8 = undefined;
+
+    try clone([3][]const u8, data, &cloned, null);
+
+    inline for (0..3) |i| {
+        try expect(std.mem.eql(u8, cloned[i], data[i]));
+        try expect(cloned[i].ptr == data[i].ptr);
+    }
+}
+
+test "clone: tagged union active variant follows slice ownership" {
+    const Payload = union(enum) {
+        bytes: []const u8,
+        n: u32,
+    };
+
+    var cloned_bytes: Payload = undefined;
+    try clone(Payload, Payload{ .bytes = "abc" }, &cloned_bytes, std.testing.allocator);
+    try expect(std.mem.eql(u8, cloned_bytes.bytes, "abc"));
+    try expect(cloned_bytes.bytes.ptr == @as([]const u8, "abc").ptr);
+
+    var cloned_n: Payload = undefined;
+    try clone(Payload, Payload{ .n = 7 }, &cloned_n, null);
+    try expect(cloned_n.n == 7);
+}
+
+test "clone: tagged union unwind frees payload when nested allocation fails" {
+    const Payload = union(enum) {
+        pair: struct {
+            a: []u8,
+            b: []u8,
+        },
+        n: u32,
+    };
+    const a = try std.testing.allocator.dupe(u8, "first");
+    defer std.testing.allocator.free(a);
+    const b = try std.testing.allocator.dupe(u8, "second");
+    defer std.testing.allocator.free(b);
+    const data = Payload{ .pair = .{ .a = a, .b = b } };
+    var cloned: Payload = undefined;
+
+    var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 1 });
+    try expectError(error.OutOfMemory, clone(Payload, data, &cloned, failing.allocator()));
+}
+
+test "clone: nested utils.List(List(...)) clones outer storage only" {
+    const Inner = utils.List(u32, 8);
+    const Outer = utils.List(Inner, 4);
+
+    var inner_a = try Inner.init(std.testing.allocator);
+    defer inner_a.deinit();
+    try inner_a.append(1);
+    try inner_a.append(2);
+    var inner_b = try Inner.init(std.testing.allocator);
+    defer inner_b.deinit();
+    try inner_b.append(3);
+
+    var data = try Outer.init(std.testing.allocator);
+    // Outer.deinit only releases the spine; the per-element inner Lists are
+    // value-copied into the spine and still owned by inner_a/inner_b above.
+    defer data.deinit();
+    try data.append(inner_a);
+    try data.append(inner_b);
+
+    var cloned: Outer = undefined;
+    try clone(Outer, data, &cloned, std.testing.allocator);
+    defer cloned.deinit();
+
+    try expect(cloned.len() == 2);
+    try expect(cloned.inner.items.ptr != data.inner.items.ptr);
+    try expect((try cloned.get(0)).len() == 2);
+    try expect((try (try cloned.get(0)).get(1)) == 2);
+    try expect((try cloned.get(1)).len() == 1);
+    try expect((try cloned.get(0)).inner.items.ptr == inner_a.inner.items.ptr);
+}
+
+test "clone of round-trippable struct matches serialize+deserialize" {
+    const allocator = std.testing.allocator;
+    const original = pastries[1];
+
+    var via_clone: Pastry = undefined;
+    try clone(Pastry, original, &via_clone, allocator);
+
+    var buf: ArrayList(u8) = .empty;
+    defer buf.deinit(allocator);
+    try serialize(Pastry, original, &buf, allocator);
+    // Pastry.name is `[]const u8`; deserialize shares it into buf.items
+    // rather than allocating, so no free is needed.
+    var via_roundtrip: Pastry = undefined;
+    try deserialize(Pastry, buf.items, &via_roundtrip, allocator);
+
+    try expect(via_clone.weight == via_roundtrip.weight);
+    try expect(std.mem.eql(u8, via_clone.name, via_roundtrip.name));
+    try expect(via_clone.weight == original.weight);
+    try expect(std.mem.eql(u8, via_clone.name, original.name));
+    try expect(via_clone.name.ptr == original.name.ptr);
 }
 
 test {

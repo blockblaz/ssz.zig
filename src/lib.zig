@@ -663,6 +663,198 @@ pub fn deserialize(T: type, serialized: []const u8, out: *T, allocator: ?Allocat
     }
 }
 
+/// Returns true when `T` can be cloned with a direct value copy.
+/// Types with custom clone functions return false so their functions are honored.
+/// Unsupported type kinds return false conservatively.
+pub fn hasNoPointers(T: type) bool {
+    if (comptime std.meta.hasFn(T, "sszClone")) return false;
+
+    return switch (@typeInfo(T)) {
+        .int, .bool, .float, .void, .null, .@"enum" => true,
+        .array => |array| hasNoPointers(array.child),
+        .vector => |vector| hasNoPointers(vector.child),
+        .optional => |optional| hasNoPointers(optional.child),
+        .@"struct" => |str| blk: {
+            inline for (str.fields) |field| {
+                if (field.is_comptime) continue;
+                if (!hasNoPointers(field.type)) break :blk false;
+            }
+            break :blk true;
+        },
+        .@"union" => |un| blk: {
+            if (un.tag_type == null) break :blk false;
+            inline for (un.fields) |field| {
+                if (!hasNoPointers(field.type)) break :blk false;
+            }
+            break :blk true;
+        },
+        else => false,
+    };
+}
+
+fn cleanupClone(T: type, data: T, allocator: Allocator) void {
+    if (comptime std.meta.hasFn(T, "deinit")) {
+        var clone_data = data;
+        clone_data.deinit();
+        return;
+    }
+    if (comptime hasNoPointers(T)) return;
+
+    switch (@typeInfo(T)) {
+        .int, .bool, .float, .null, .@"enum" => {},
+        .array => |array| {
+            if (comptime !hasNoPointers(array.child)) {
+                for (data) |item| cleanupClone(array.child, item, allocator);
+            }
+        },
+        .optional => |optional| {
+            if (data) |value| cleanupClone(optional.child, value, allocator);
+        },
+        .pointer => |ptr| switch (ptr.size) {
+            .slice => {
+                if (comptime ptr.is_const and @sizeOf(ptr.child) == 1) return;
+                if (comptime !hasNoPointers(ptr.child)) {
+                    for (data) |item| cleanupClone(ptr.child, item, allocator);
+                }
+                allocator.free(data);
+            },
+            .one => {
+                cleanupClone(ptr.child, data.*, allocator);
+                const alignment = comptime ptr.alignment orelse @alignOf(ptr.child);
+                if (comptime alignment == @alignOf(ptr.child)) {
+                    allocator.destroy(@constCast(data));
+                } else {
+                    const slice: []align(alignment) ptr.child = @as([*]align(alignment) ptr.child, @ptrCast(@constCast(data)))[0..1];
+                    allocator.free(slice);
+                }
+            },
+            else => @compileError("clone cleanup does not support " ++ @tagName(ptr.size) ++ " pointers"),
+        },
+        .@"struct" => |str| {
+            inline for (str.fields) |field| {
+                if (field.is_comptime) continue;
+                cleanupClone(field.type, @field(data, field.name), allocator);
+            }
+        },
+        .@"union" => |un| {
+            if (un.tag_type == null) @compileError("clone cleanup does not support untagged unions");
+            switch (data) {
+                inline else => |payload| cleanupClone(@TypeOf(payload), payload, allocator),
+            }
+        },
+        else => {},
+    }
+}
+
+/// Clones `data` into `cloned`.
+/// Cloned values follow the same cleanup model as normally constructed SSZ
+/// values: containers use `deinit`, allocated slices use `allocator.free`, and
+/// borrowed `[]const u8` data remains borrowed. Types providing `sszClone`
+/// must also provide `deinit`; partial-failure unwinds rely on `deinit` to
+/// release whatever the hook allocated.
+pub fn clone(T: type, data: T, cloned: *T, allocator: ?Allocator) !void {
+    if (comptime std.meta.hasFn(T, "sszClone")) {
+        if (comptime !std.meta.hasFn(T, "deinit")) {
+            @compileError("type " ++ @typeName(T) ++ " provides sszClone but no deinit; cleanup on partial clone failure would be undefined");
+        }
+        return data.sszClone(cloned, allocator);
+    }
+    if (comptime hasNoPointers(T)) {
+        cloned.* = data;
+        return;
+    }
+
+    switch (@typeInfo(T)) {
+        .int, .bool, .float, .void, .null, .@"enum" => cloned.* = data,
+        .array => |array| {
+            var done: usize = 0;
+            errdefer if (allocator) |alloc| {
+                for (cloned.*[0..done]) |item| cleanupClone(array.child, item, alloc);
+            };
+            while (done < data.len) : (done += 1) {
+                try clone(array.child, data[done], &cloned.*[done], allocator);
+            }
+        },
+        .optional => |optional| {
+            if (data == null) {
+                cloned.* = null;
+                return;
+            }
+            var child_clone: optional.child = undefined;
+            try clone(optional.child, data.?, &child_clone, allocator);
+            cloned.* = child_clone;
+        },
+        .pointer => |ptr| switch (ptr.size) {
+            .slice => {
+                if (comptime ptr.is_const and @sizeOf(ptr.child) == 1) {
+                    cloned.* = data;
+                    return;
+                }
+                const alloc = allocator orelse return error.AllocatorRequired;
+                const alignment: std.mem.Alignment = comptime .fromByteUnits(ptr.alignment orelse @alignOf(ptr.child));
+                const sentinel = comptime ptr.sentinel();
+                const out = try alloc.allocWithOptions(ptr.child, data.len, alignment, sentinel);
+                errdefer alloc.free(out);
+                if (comptime hasNoPointers(ptr.child)) {
+                    @memcpy(out, data);
+                } else {
+                    var done: usize = 0;
+                    errdefer for (out[0..done]) |item| cleanupClone(ptr.child, item, alloc);
+                    while (done < data.len) : (done += 1) {
+                        try clone(ptr.child, data[done], &out[done], allocator);
+                    }
+                }
+                cloned.* = out;
+            },
+            .one => {
+                const alloc = allocator orelse return error.AllocatorRequired;
+                const alignment = comptime ptr.alignment orelse @alignOf(ptr.child);
+                if (comptime alignment == @alignOf(ptr.child)) {
+                    const slot = try alloc.create(ptr.child);
+                    errdefer alloc.destroy(slot);
+                    try clone(ptr.child, data.*, slot, allocator);
+                    cloned.* = slot;
+                } else {
+                    const alloc_alignment: std.mem.Alignment = comptime .fromByteUnits(alignment);
+                    const slot = try alloc.allocWithOptions(ptr.child, 1, alloc_alignment, null);
+                    errdefer alloc.free(slot);
+                    try clone(ptr.child, data.*, &slot[0], allocator);
+                    cloned.* = &slot[0];
+                }
+            },
+            else => return error.UnSupportedPointerType,
+        },
+        .@"struct" => |str| {
+            var fields_done: usize = 0;
+            errdefer if (allocator) |alloc| {
+                var seen: usize = 0;
+                inline for (str.fields) |field| {
+                    if (field.is_comptime) continue;
+                    if (seen >= fields_done) break;
+                    cleanupClone(field.type, @field(cloned.*, field.name), alloc);
+                    seen += 1;
+                }
+            };
+            inline for (str.fields) |field| {
+                if (field.is_comptime) continue;
+                try clone(field.type, @field(data, field.name), &@field(cloned.*, field.name), allocator);
+                fields_done += 1;
+            }
+        },
+        .@"union" => |un| {
+            if (un.tag_type == null) @compileError("clone does not support untagged unions");
+            switch (data) {
+                inline else => |payload, tag| {
+                    var payload_clone: @TypeOf(payload) = undefined;
+                    try clone(@TypeOf(payload), payload, &payload_clone, allocator);
+                    cloned.* = @unionInit(T, @tagName(tag), payload_clone);
+                },
+            }
+        },
+        else => return error.UnknownType,
+    }
+}
+
 pub fn mixInLength2(Hasher: type, root: [Hasher.digest_length]u8, length: usize, out: *[Hasher.digest_length]u8) void {
     var hasher = Hasher.init(Hasher.Options{});
     hasher.update(root[0..]);

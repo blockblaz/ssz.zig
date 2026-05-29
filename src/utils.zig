@@ -36,11 +36,11 @@ pub fn List(T: type, comptime N: usize) type {
         }
 
         /// Clones this list's backing storage; item ownership matches normal List values.
-        pub fn sszClone(self: *const Self, cloned: *Self, allocator: ?Allocator) !void {
-            const alloc = allocator orelse return error.AllocatorRequired;
-            cloned.* = try Self.init(alloc);
+        pub fn clone(self: *const Self, allocator: Allocator) !Self {
+            var cloned = try Self.init(allocator);
             errdefer cloned.deinit();
-            try cloned.inner.appendSlice(alloc, self.inner.items);
+            try cloned.inner.appendSlice(allocator, self.inner.items);
+            return cloned;
         }
 
         pub fn isFixedSizeObject() bool {
@@ -263,12 +263,12 @@ pub fn Bitlist(comptime N: usize) type {
         }
 
         /// Clones this bitlist's backing storage.
-        pub fn sszClone(self: *const Self, cloned: *Self, allocator: ?Allocator) !void {
-            const alloc = allocator orelse return error.AllocatorRequired;
-            cloned.* = try Self.init(alloc);
+        pub fn clone(self: *const Self, allocator: Allocator) !Self {
+            var cloned = try Self.init(allocator);
             errdefer cloned.deinit();
             cloned.length = self.length;
-            try cloned.inner.appendSlice(alloc, self.inner.items);
+            try cloned.inner.appendSlice(allocator, self.inner.items);
+            return cloned;
         }
 
         pub fn sszDecode(serialized: []const u8, out: *Self, allocator: ?std.mem.Allocator) !void {

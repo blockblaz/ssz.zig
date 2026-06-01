@@ -2932,6 +2932,57 @@ test "TreeHasher reuses unchanged nodes when growing" {
     try expect(grow_count < full_count);
 }
 
+test "utils.List.clone copies backing storage independently" {
+    const L = utils.List([]const u8, 4);
+    var data = try L.init(std.testing.allocator);
+    defer data.deinit();
+    try data.append("aa");
+    try data.append("bb");
+
+    var cloned = try data.clone(std.testing.allocator);
+    defer cloned.deinit();
+
+    try expect(cloned.len() == data.len());
+    try expect(cloned.inner.items.ptr != data.inner.items.ptr);
+    try expect(std.mem.eql(u8, (try cloned.get(0)), "aa"));
+    try expect((try cloned.get(0)).ptr == (try data.get(0)).ptr);
+}
+
+test "utils.List.clone with variable-sized struct items" {
+    const L = utils.List(Pastry, 8);
+    var data = try L.init(std.testing.allocator);
+    defer data.deinit();
+    try data.append(pastries[0]);
+    try data.append(pastries[1]);
+
+    var cloned = try data.clone(std.testing.allocator);
+    defer cloned.deinit();
+
+    try expect(cloned.len() == 2);
+    try expect(cloned.inner.items.ptr != data.inner.items.ptr);
+    try expect((try cloned.get(0)).weight == pastries[0].weight);
+    try expect((try cloned.get(1)).weight == pastries[1].weight);
+    // Item-level []const u8 fields stay borrowed (shallow item copy).
+    try expect((try cloned.get(0)).name.ptr == pastries[0].name.ptr);
+    try expect((try cloned.get(1)).name.ptr == pastries[1].name.ptr);
+}
+
+test "utils.Bitlist.clone copies backing storage independently" {
+    const B = utils.Bitlist(32);
+    var data = try B.init(std.testing.allocator);
+    defer data.deinit();
+    try data.append(true);
+    try data.append(false);
+    try data.append(true);
+
+    var cloned = try data.clone(std.testing.allocator);
+    defer cloned.deinit();
+
+    try expect(cloned.eql(&data));
+    try cloned.set(0, false);
+    try expect((try data.get(0)) == true);
+}
+
 test {
     _ = @import("beacon_tests.zig");
     _ = @import("merkle_cache.zig");

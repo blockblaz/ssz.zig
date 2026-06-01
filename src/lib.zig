@@ -10,7 +10,7 @@ const Allocator = std.mem.Allocator;
 const Sha256 = std.crypto.hash.sha2.Sha256;
 
 /// Number of bytes per chunk.
-const BYTES_PER_CHUNK = 32;
+pub const BYTES_PER_CHUNK = 32;
 
 pub fn serializedFixedSize(T: type) !usize {
     const info = @typeInfo(T);
@@ -417,17 +417,13 @@ pub fn deserialize(T: type, serialized: []const u8, out: *T, allocator: ?Allocat
     const enforce_min = !has_custom_decode or comptime std.meta.hasFn(T, "minInLength");
     const enforce_max = !has_custom_decode or comptime std.meta.hasFn(T, "maxInLength");
 
-    // Bounds check: ensure serialized length is within [minInLength, maxInLength]
-    const min_len: ?usize = if (enforce_min) blk: {
-        const m = minInLength(T) catch break :blk null;
-        break :blk m;
-    } else null;
+    // Bounds check: ensure serialized length is within [minInLength, maxInLength].
+    // The bounds depend only on T, so fold them to comptime constants; types
+    // with no static bound (e.g. a slice) resolve to null and skip the check.
+    const min_len: ?usize = comptime if (enforce_min) (minInLength(T) catch null) else null;
     if (min_len) |m| if (serialized.len < m) return error.PayloadTooSmall;
 
-    const max_len: ?usize = if (enforce_max) blk: {
-        const m = maxInLength(T) catch break :blk null;
-        break :blk m;
-    } else null;
+    const max_len: ?usize = comptime if (enforce_max) (maxInLength(T) catch null) else null;
     if (max_len) |m| if (serialized.len > m) return error.PayloadTooLarge;
 
     // shortcut if the type implements its own decode method
@@ -734,8 +730,8 @@ pub fn chunkCount(T: type) usize {
     }
 }
 
-const chunk = [BYTES_PER_CHUNK]u8;
-const zero_chunk: chunk = [_]u8{0} ** BYTES_PER_CHUNK;
+pub const chunk = [BYTES_PER_CHUNK]u8;
+pub const zero_chunk: chunk = [_]u8{0} ** BYTES_PER_CHUNK;
 
 pub fn pack(T: type, values: T, l: *ArrayList(u8), allocator: Allocator) ![]chunk {
     try serialize(T, values, l, allocator);
@@ -914,26 +910,6 @@ fn packBits(bits: []const bool, l: *ArrayList(u8), allocator: Allocator) ![]chun
 pub fn hashTreeRoot(Hasher: type, T: type, value: T, out: *[Hasher.digest_length]u8, allocator: Allocator) !void {
     // Check if type has its own hashTreeRoot method at compile time
     if (comptime std.meta.hasFn(T, "hashTreeRoot")) {
-        // value is a by-value copy; if hashTreeRoot lazily allocates a new cache
-        // on this copy, we must free it to prevent leaks. But if the original
-        // already had a cache (shallow-copied into value), we must not free it.
-        const has_optional_cache = comptime blk: {
-            if (!std.meta.hasFn(T, "deinitCache")) break :blk false;
-            if (!@hasField(T, "cache")) break :blk false;
-            break :blk @typeInfo(@FieldType(T, "cache")) == .optional;
-        };
-        if (has_optional_cache) {
-            const cache_before = value.cache;
-            var mutable = value;
-            errdefer if (cache_before == null and mutable.cache != null) {
-                mutable.deinitCache();
-            };
-            try mutable.hashTreeRoot(Hasher, out, allocator);
-            if (cache_before == null and mutable.cache != null) {
-                mutable.deinitCache();
-            }
-            return;
-        }
         return value.hashTreeRoot(Hasher, out, allocator);
     }
 

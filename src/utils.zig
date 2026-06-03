@@ -275,9 +275,6 @@ pub fn List(T: type, comptime N: usize) type {
 }
 
 /// Implements the SSZ `Bitlist[N]` container.
-///
-/// Like `List`, this is the uncached "regular" object; wrap it in
-/// `TreeHasher(Bitlist(N), Hasher)` to add Merkle caching.
 pub fn Bitlist(comptime N: usize) type {
     return struct {
         const Self = @This();

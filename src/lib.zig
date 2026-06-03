@@ -418,8 +418,6 @@ pub fn deserialize(T: type, serialized: []const u8, out: *T, allocator: ?Allocat
     const enforce_max = !has_custom_decode or comptime std.meta.hasFn(T, "maxInLength");
 
     // Bounds check: ensure serialized length is within [minInLength, maxInLength].
-    // The bounds depend only on T, so fold them to comptime constants; types
-    // with no static bound (e.g. a slice) resolve to null and skip the check.
     const min_len: ?usize = comptime if (enforce_min) (minInLength(T) catch null) else null;
     if (min_len) |m| if (serialized.len < m) return error.PayloadTooSmall;
 

@@ -10,7 +10,7 @@ const Allocator = std.mem.Allocator;
 const Sha256 = std.crypto.hash.sha2.Sha256;
 
 /// Number of bytes per chunk.
-const BYTES_PER_CHUNK = 32;
+pub const BYTES_PER_CHUNK = 32;
 
 pub fn serializedFixedSize(T: type) !usize {
     const info = @typeInfo(T);
@@ -417,17 +417,11 @@ pub fn deserialize(T: type, serialized: []const u8, out: *T, allocator: ?Allocat
     const enforce_min = !has_custom_decode or comptime std.meta.hasFn(T, "minInLength");
     const enforce_max = !has_custom_decode or comptime std.meta.hasFn(T, "maxInLength");
 
-    // Bounds check: ensure serialized length is within [minInLength, maxInLength]
-    const min_len: ?usize = if (enforce_min) blk: {
-        const m = minInLength(T) catch break :blk null;
-        break :blk m;
-    } else null;
+    // Bounds check: ensure serialized length is within [minInLength, maxInLength].
+    const min_len: ?usize = comptime if (enforce_min) (minInLength(T) catch null) else null;
     if (min_len) |m| if (serialized.len < m) return error.PayloadTooSmall;
 
-    const max_len: ?usize = if (enforce_max) blk: {
-        const m = maxInLength(T) catch break :blk null;
-        break :blk m;
-    } else null;
+    const max_len: ?usize = comptime if (enforce_max) (maxInLength(T) catch null) else null;
     if (max_len) |m| if (serialized.len > m) return error.PayloadTooLarge;
 
     // shortcut if the type implements its own decode method
@@ -734,8 +728,8 @@ pub fn chunkCount(T: type) usize {
     }
 }
 
-const chunk = [BYTES_PER_CHUNK]u8;
-const zero_chunk: chunk = [_]u8{0} ** BYTES_PER_CHUNK;
+pub const chunk = [BYTES_PER_CHUNK]u8;
+pub const zero_chunk: chunk = [_]u8{0} ** BYTES_PER_CHUNK;
 
 pub fn pack(T: type, values: T, l: *ArrayList(u8), allocator: Allocator) ![]chunk {
     try serialize(T, values, l, allocator);

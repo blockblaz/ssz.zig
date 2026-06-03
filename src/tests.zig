@@ -1192,6 +1192,31 @@ test "minInLength/maxInLength for struct with List field" {
     try expect(try libssz.maxInLength(S) == 4 + 4 + 8 * 1);
 }
 
+test "minInLength/maxInLength fold at compile time" {
+    // The bounds depend only on the type, so they fold to compile-time
+    // constants usable directly in comptime contexts.
+    comptime {
+        std.debug.assert((libssz.maxInLength(u64) catch unreachable) == 8);
+        std.debug.assert((libssz.minInLength(u64) catch unreachable) == 8);
+        std.debug.assert((libssz.maxInLength([4]u8) catch unreachable) == 4);
+        std.debug.assert((libssz.minInLength(bool) catch unreachable) == 1);
+    }
+
+    const S = struct { a: u32, b: u16 };
+    // Used as an array length, proving the bound is a genuine compile-time constant.
+    const Buf = [libssz.maxInLength(S) catch unreachable]u8;
+    try expect(@typeInfo(Buf).array.len == 4 + 2);
+
+    const ListU64 = utils.List(u64, 16);
+    try expect(try libssz.maxInLength(ListU64) == 16 * 8);
+    try expect(try libssz.minInLength(ListU64) == 0);
+
+    // Dynamic/unbounded types still return a runtime error, not a compile error.
+    const VarS = struct { a: u32, b: []const u8 };
+    try expectError(error.NoMaxInLengthAvailable, libssz.maxInLength(VarS));
+    try expectError(error.NoMinInLengthAvailable, libssz.minInLength(VarS));
+}
+
 test "deserialize rejects payload longer than maxInLength" {
     var out_u32: u32 = undefined;
     try expectError(error.PayloadTooLarge, deserialize(u32, &[_]u8{ 0x01, 0x02, 0x03, 0x04, 0x05 }, &out_u32, null));
@@ -2300,6 +2325,75 @@ test "roundtrip: [2][4]u32 (nested fixed array) preserves inner elements" {
     try expect(std.mem.eql(u32, &out[1], &.{ 5, 6, 7, 8 }));
 }
 
+test "TreeHasher(List(u64)) matches uncached and updates on set" {
+    const CachedList = utils.TreeHasher(utils.List(u64, 1024), Sha256);
+    var h = try CachedList.init(std.testing.allocator);
+    defer h.deinit();
+
+    try h.append(1);
+    try h.append(2);
+    try h.append(3);
+
+    var cached: [32]u8 = undefined;
+    try h.hashTreeRoot(Sha256, &cached, std.testing.allocator);
+
+    // Truth: the uncached regular object.
+    var uncached: [32]u8 = undefined;
+    try h.inner.hashTreeRoot(Sha256, &uncached, std.testing.allocator);
+    try expect(std.mem.eql(u8, &cached, &uncached));
+
+    // Modify one element; cached recompute must match a fresh uncached list.
+    try h.set(1, 42);
+    var cached2: [32]u8 = undefined;
+    try h.hashTreeRoot(Sha256, &cached2, std.testing.allocator);
+
+    var fresh = try utils.List(u64, 1024).init(std.testing.allocator);
+    defer fresh.deinit();
+    try fresh.append(1);
+    try fresh.append(42);
+    try fresh.append(3);
+    var expected: [32]u8 = undefined;
+    try fresh.hashTreeRoot(Sha256, &expected, std.testing.allocator);
+
+    try expect(std.mem.eql(u8, &cached2, &expected));
+    try expect(!std.mem.eql(u8, &cached2, &uncached));
+}
+
+test "TreeHasher reflects direct backing-store mutation" {
+    // Content-addressed leaf refresh: mutating inner.items directly, bypassing
+    // set()/append(), must still produce a correct (non-stale) cached root.
+    const CachedList = utils.TreeHasher(utils.List(u64, 1024), Sha256);
+    var h = try CachedList.init(std.testing.allocator);
+    defer h.deinit();
+
+    try h.append(1);
+    try h.append(2);
+    try h.append(3);
+
+    var hash_before: [32]u8 = undefined;
+    try h.hashTreeRoot(Sha256, &hash_before, std.testing.allocator);
+
+    h.inner.inner.items[1] = 99; // direct mutation, no set()
+    var hash_after_first: [32]u8 = undefined;
+    try h.hashTreeRoot(Sha256, &hash_after_first, std.testing.allocator);
+
+    h.inner.inner.items[1] = 42;
+    var hash_after_second: [32]u8 = undefined;
+    try h.hashTreeRoot(Sha256, &hash_after_second, std.testing.allocator);
+
+    var fresh = try utils.List(u64, 1024).init(std.testing.allocator);
+    defer fresh.deinit();
+    try fresh.append(1);
+    try fresh.append(42);
+    try fresh.append(3);
+    var expected: [32]u8 = undefined;
+    try fresh.hashTreeRoot(Sha256, &expected, std.testing.allocator);
+
+    try expect(std.mem.eql(u8, &hash_after_second, &expected));
+    try expect(!std.mem.eql(u8, &hash_before, &hash_after_first));
+    try expect(!std.mem.eql(u8, &hash_after_first, &hash_after_second));
+}
+
 test "deserialize struct: invalid first var offset returns error (no slice panic)" {
     const S = struct {
         a: u32,
@@ -2574,6 +2668,270 @@ test "utils.List dynamic-item: offsets decrease" {
     try expectError(error.OffsetOrdering, L.sszDecode(&buf, &out, std.testing.allocator));
 }
 
+test "TreeHasher(List(*Point)) reflects pointee mutation" {
+    const Point = struct { x: u32, y: u32 };
+    const CachedList = utils.TreeHasher(utils.List(*Point, 8), Sha256);
+
+    var h = try CachedList.init(std.testing.allocator);
+    defer h.deinit();
+
+    var p1: Point = .{ .x = 1, .y = 2 };
+    var p2: Point = .{ .x = 3, .y = 4 };
+    try h.append(&p1);
+    try h.append(&p2);
+
+    var hash_before: [32]u8 = undefined;
+    try h.hashTreeRoot(Sha256, &hash_before, std.testing.allocator);
+
+    p2.x = 999; // mutate pointee, bypassing set()
+    var hash_after: [32]u8 = undefined;
+    try h.hashTreeRoot(Sha256, &hash_after, std.testing.allocator);
+
+    var fresh_uncached: [32]u8 = undefined;
+    try h.inner.hashTreeRoot(Sha256, &fresh_uncached, std.testing.allocator);
+
+    try expect(std.mem.eql(u8, &hash_after, &fresh_uncached));
+    try expect(!std.mem.eql(u8, &hash_before, &hash_after));
+}
+
+test "TreeHasher zero-capacity List(u64,0) does not panic" {
+    const CachedList = utils.TreeHasher(utils.List(u64, 0), Sha256);
+    var h = try CachedList.init(std.testing.allocator);
+    defer h.deinit();
+
+    var cached: [32]u8 = undefined;
+    try h.hashTreeRoot(Sha256, &cached, std.testing.allocator);
+    var uncached: [32]u8 = undefined;
+    try h.inner.hashTreeRoot(Sha256, &uncached, std.testing.allocator);
+    try expect(std.mem.eql(u8, &cached, &uncached));
+}
+
+test "TreeHasher zero-capacity Bitlist(0) does not panic" {
+    const CachedBits = utils.TreeHasher(utils.Bitlist(0), Sha256);
+    var h = try CachedBits.init(std.testing.allocator);
+    defer h.deinit();
+
+    var cached: [32]u8 = undefined;
+    try h.hashTreeRoot(Sha256, &cached, std.testing.allocator);
+    var uncached: [32]u8 = undefined;
+    try h.inner.hashTreeRoot(Sha256, &uncached, std.testing.allocator);
+    try expect(std.mem.eql(u8, &cached, &uncached));
+}
+
+test "TreeHasher allocates proportional to data, not the SSZ limit" {
+    // A 2^40-element list must not try to allocate the full tree. Empty hashes
+    // instantly; adding a few items grows the cache by only a handful of nodes.
+    const Huge = utils.TreeHasher(utils.List(u32, 1 << 40), Sha256);
+    var h = try Huge.init(std.testing.allocator);
+    defer h.deinit();
+
+    var empty_cached: [32]u8 = undefined;
+    try h.hashTreeRoot(Sha256, &empty_cached, std.testing.allocator);
+    try expect(h.cache.capacity == 0); // zero allocation for empty
+    var empty_uncached: [32]u8 = undefined;
+    try h.inner.hashTreeRoot(Sha256, &empty_uncached, std.testing.allocator);
+    try expect(std.mem.eql(u8, &empty_cached, &empty_uncached));
+
+    // 10 u32 = 2 chunks -> capacity 2, i.e. 3 nodes, not 2^38 chunks.
+    for (0..10) |i| try h.append(@intCast(i));
+    var cached: [32]u8 = undefined;
+    try h.hashTreeRoot(Sha256, &cached, std.testing.allocator);
+    try expect(h.cache.capacity == 2);
+    var uncached: [32]u8 = undefined;
+    try h.inner.hashTreeRoot(Sha256, &uncached, std.testing.allocator);
+    try expect(std.mem.eql(u8, &cached, &uncached));
+}
+
+test "TreeHasher persists its cache when nested in a Container" {
+    const Container = struct {
+        balances: utils.TreeHasher(utils.List(u64, 1024), Sha256),
+    };
+
+    var c: Container = .{ .balances = try utils.TreeHasher(utils.List(u64, 1024), Sha256).init(std.testing.allocator) };
+    defer c.balances.deinit();
+
+    try c.balances.append(1);
+    try c.balances.append(2);
+
+    var h1: [32]u8 = undefined;
+    try hashTreeRoot(Sha256, Container, c, &h1, std.testing.allocator);
+    // Cache persisted across the by-value container hash (not freed per call).
+    try expect(c.balances.cache.capacity > 0);
+
+    var h2: [32]u8 = undefined;
+    try hashTreeRoot(Sha256, Container, c, &h2, std.testing.allocator);
+    try expect(std.mem.eql(u8, &h1, &h2));
+
+    try c.balances.set(0, 99);
+    var h3: [32]u8 = undefined;
+    try hashTreeRoot(Sha256, Container, c, &h3, std.testing.allocator);
+    try expect(!std.mem.eql(u8, &h2, &h3));
+
+    // Final root matches a fresh uncached container.
+    var fresh = try utils.List(u64, 1024).init(std.testing.allocator);
+    defer fresh.deinit();
+    try fresh.append(99);
+    try fresh.append(2);
+    var expected_field: [32]u8 = undefined;
+    try fresh.hashTreeRoot(Sha256, &expected_field, std.testing.allocator);
+    var expected_container: [32]u8 = undefined;
+    // Container is a single-field struct: root = merkleize([field_root], null)
+    var chunks = [_][32]u8{expected_field};
+    try libssz.merkleize(Sha256, &chunks, null, &expected_container);
+    try expect(std.mem.eql(u8, &h3, &expected_container));
+}
+
+const SweepPoint = struct { x: u32, y: u32 };
+fn mkU8(i: usize) u8 {
+    return @truncate(i *% 7 +% 1);
+}
+fn mkU64(i: usize) u64 {
+    return @intCast((i *% 1000) +% 1);
+}
+fn mkU256(i: usize) u256 {
+    return (@as(u256, @intCast(i)) << 200) | @as(u256, @intCast(i));
+}
+fn mkPoint(i: usize) SweepPoint {
+    return .{ .x = @truncate(i), .y = @truncate(i *% 3) };
+}
+fn mkBool(i: usize) bool {
+    return i % 3 == 0;
+}
+
+fn sweepInner(comptime Inner: type, comptime makeItem: anytype) !void {
+    const alloc = std.testing.allocator;
+    const Cached = utils.TreeHasher(Inner, Sha256);
+    const counts = [_]usize{ 0, 1, 2, 3, 7, 8, 9, 16, 31, 32, 33 };
+    for (counts) |cnt| {
+        var h = try Cached.init(alloc);
+        defer h.deinit();
+        for (0..cnt) |i| try h.append(makeItem(i));
+
+        var c: [32]u8 = undefined;
+        try h.hashTreeRoot(Sha256, &c, alloc);
+        var u: [32]u8 = undefined;
+        try h.inner.hashTreeRoot(Sha256, &u, alloc);
+        try expect(std.mem.eql(u8, &c, &u));
+
+        if (cnt > 0) {
+            try h.set(0, makeItem(cnt + 3));
+            try h.hashTreeRoot(Sha256, &c, alloc);
+            try h.inner.hashTreeRoot(Sha256, &u, alloc);
+            try expect(std.mem.eql(u8, &c, &u));
+        }
+    }
+}
+
+test "TreeHasher parity sweep: List(u8)" {
+    try sweepInner(utils.List(u8, 256), mkU8);
+}
+test "TreeHasher parity sweep: List(u64)" {
+    try sweepInner(utils.List(u64, 1024), mkU64);
+}
+test "TreeHasher parity sweep: List(u256)" {
+    try sweepInner(utils.List(u256, 256), mkU256);
+}
+test "TreeHasher parity sweep: List(composite)" {
+    try sweepInner(utils.List(SweepPoint, 256), mkPoint);
+}
+test "TreeHasher parity sweep: Bitlist" {
+    try sweepInner(utils.Bitlist(2048), mkBool);
+}
+
+test "TreeHasher reflects backing-store shrink" {
+    const Cached = utils.TreeHasher(utils.List(u64, 64), Sha256);
+    var h = try Cached.init(std.testing.allocator);
+    defer h.deinit();
+    for (0..20) |i| try h.append(@intCast(i)); // 20 u64 = 5 chunks -> capacity 8
+    var c: [32]u8 = undefined;
+    try h.hashTreeRoot(Sha256, &c, std.testing.allocator);
+
+    // Shrink the backing store directly to 4 items (1 chunk), bypassing any API.
+    h.inner.inner.items.len = 4;
+    try h.hashTreeRoot(Sha256, &c, std.testing.allocator);
+    var u: [32]u8 = undefined;
+    try h.inner.hashTreeRoot(Sha256, &u, std.testing.allocator);
+    try expect(std.mem.eql(u8, &c, &u));
+}
+
+test "TreeHasher parity across many growth doublings" {
+    const Cached = utils.TreeHasher(utils.List(u256, 1 << 12), Sha256);
+    var h = try Cached.init(std.testing.allocator);
+    defer h.deinit();
+
+    var i: usize = 0;
+    while (i < 600) : (i += 1) {
+        try h.append(@intCast(i));
+        if (i % 7 == 0 or i + 1 == 600) {
+            var c: [32]u8 = undefined;
+            try h.hashTreeRoot(Sha256, &c, std.testing.allocator);
+            var u: [32]u8 = undefined;
+            try h.inner.hashTreeRoot(Sha256, &u, std.testing.allocator);
+            try expect(std.mem.eql(u8, &c, &u));
+
+            // Also mutate an earlier (reused-subtree) element and re-check.
+            if (i > 10) {
+                try h.set(i / 2, @intCast(i * 3));
+                try h.hashTreeRoot(Sha256, &c, std.testing.allocator);
+                try h.inner.hashTreeRoot(Sha256, &u, std.testing.allocator);
+                try expect(std.mem.eql(u8, &c, &u));
+            }
+        }
+    }
+}
+
+// Sha256 that counts finalize calls, to prove the cache reuses nodes on growth.
+var g_hash_calls: usize = 0;
+const CountingSha256 = struct {
+    inner: Sha256,
+    pub const digest_length = Sha256.digest_length;
+    pub const Options = Sha256.Options;
+    pub fn init(o: Options) @This() {
+        return .{ .inner = Sha256.init(o) };
+    }
+    pub fn update(self: *@This(), bytes: []const u8) void {
+        self.inner.update(bytes);
+    }
+    pub fn final(self: *@This(), out: *[digest_length]u8) void {
+        g_hash_calls += 1;
+        self.inner.final(out);
+    }
+    pub fn finalResult(self: *@This()) [digest_length]u8 {
+        // Used only at comptime (zero-hash table); must not touch runtime state.
+        return self.inner.finalResult();
+    }
+};
+
+test "TreeHasher reuses unchanged nodes when growing" {
+    const Cached = utils.TreeHasher(utils.List(u256, 1 << 14), CountingSha256);
+
+    // Build to capacity 512, then append one element to force a grow to 1024.
+    var grown = try Cached.init(std.testing.allocator);
+    defer grown.deinit();
+    for (0..512) |i| try grown.append(@intCast(i));
+    var out: [32]u8 = undefined;
+    try grown.hashTreeRoot(CountingSha256, &out, std.testing.allocator);
+
+    try grown.append(512);
+    g_hash_calls = 0;
+    try grown.hashTreeRoot(CountingSha256, &out, std.testing.allocator);
+    const grow_count = g_hash_calls;
+
+    // Build the same 513-chunk tree from scratch (full rebuild at capacity 1024).
+    var fresh = try Cached.init(std.testing.allocator);
+    defer fresh.deinit();
+    for (0..513) |i| try fresh.append(@intCast(i));
+    g_hash_calls = 0;
+    var out2: [32]u8 = undefined;
+    try fresh.hashTreeRoot(CountingSha256, &out2, std.testing.allocator);
+    const full_count = g_hash_calls;
+
+    // Same root, but the grow path reused the transplanted left subtree and so
+    // performed strictly fewer hashes than the from-scratch rebuild.
+    try expect(std.mem.eql(u8, &out, &out2));
+    try expect(grow_count < full_count);
+}
+
 test "utils.List.clone copies backing storage independently" {
     const L = utils.List([]const u8, 4);
     var data = try L.init(std.testing.allocator);
@@ -2627,4 +2985,5 @@ test "utils.Bitlist.clone copies backing storage independently" {
 
 test {
     _ = @import("beacon_tests.zig");
+    _ = @import("merkle_cache.zig");
 }

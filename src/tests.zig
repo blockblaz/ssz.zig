@@ -2429,6 +2429,24 @@ test "deserialize struct: fixed-field read past buffer" {
     try expectError(error.OffsetExceedsSize, deserialize(S, &buf, &out, std.testing.allocator));
 }
 
+test "deserialize: empty list of variable-size elements" {
+    const S = struct {
+        items: [][]const u8,
+    };
+    const empty: [][]const u8 = &.{};
+    const original = S{ .items = empty };
+
+    var list: ArrayList(u8) = .empty;
+    defer list.deinit(std.testing.allocator);
+    try serialize(S, original, &list, std.testing.allocator);
+
+    var out: S = undefined;
+    try deserialize(S, list.items, &out, std.testing.allocator);
+    defer std.testing.allocator.free(out.items);
+
+    try expect(out.items.len == 0);
+}
+
 test "deserialize struct: nested variable container truncated in outer slice" {
     const Inner = struct {
         x: u32,

@@ -512,6 +512,14 @@ pub fn deserialize(T: type, serialized: []const u8, out: *T, allocator: ?Allocat
                         try deserialize(ptr.child, serialized[i * pitch .. (i + 1) * pitch], &out.*[i], allocator);
                     }
                 } else {
+                    // Empty list of variable-size elements is encoded as zero bytes
+                    // (no offset table is needed when there are no elements).
+                    if (serialized.len == 0) {
+                        if (allocator) |alloc| {
+                            out.* = try alloc.alloc(ptr.child, 0);
+                        }
+                        return;
+                    }
                     // read the first index, determine when the "variable size" list ends,
                     // and determine the size of the item as a result.
                     if (serialized.len < 4) return error.OffsetExceedsSize;

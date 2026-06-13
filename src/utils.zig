@@ -512,6 +512,10 @@ pub fn TreeHasher(comptime Inner: type, comptime Hasher: type) type {
         const Cache = merkle_cache.MerkleCache(Hasher);
         const target_depth = merkle_cache.targetDepth(Inner.chunkCountLimit());
 
+        /// Re-export the inner item type so the wrapper is a drop-in for
+        /// callers that reference `List(T, N).Item` / `Bitlist(N).Item`.
+        pub const Item = Inner.Item;
+
         inner: Inner,
         cache: *Cache,
         allocator: Allocator,
@@ -570,5 +574,245 @@ pub fn TreeHasher(comptime Inner: type, comptime Hasher: type) type {
         pub fn append(self: *Self, item: Inner.Item) !void {
             return self.inner.append(item);
         }
+
+        // ---- Generic SSZ protocol (dispatched by lib.zig via std.meta.hasFn) ----
+        // The cache is hash-only; (de)serialization and sizing forward straight
+        // to `inner`, so a TreeHasher field of a container serializes byte-for-byte
+        // identically to the unwrapped list.
+
+        pub fn sszEncode(self: *const Self, l: *ArrayList(u8), allocator: Allocator) !void {
+            return self.inner.sszEncode(l, allocator);
+        }
+
+        pub fn serializedSize(self: *const Self) !usize {
+            return self.inner.serializedSize();
+        }
+
+        pub fn isFixedSizeObject() bool {
+            return Inner.isFixedSizeObject();
+        }
+
+        pub fn maxInLength() !usize {
+            return Inner.maxInLength();
+        }
+
+        pub fn minInLength() usize {
+            return Inner.minInLength();
+        }
+
+        /// Decodes into `out`, allocating a fresh empty cache for it. The next
+        /// `hashTreeRoot` call populates the cache via the content-addressed
+        /// leaf refresh, so the decoded value owns an independent, valid tree.
+        pub fn sszDecode(serialized: []const u8, out: *Self, allocator: ?Allocator) !void {
+            const alloc = allocator orelse return error.AllocatorRequired;
+            const c = try alloc.create(Cache);
+            errdefer alloc.destroy(c);
+            c.* = Cache.init();
+            out.* = .{ .inner = undefined, .cache = c, .allocator = alloc };
+            try Inner.sszDecode(serialized, &out.inner, allocator);
+        }
+
+        // ---- Lifecycle ----
+
+        /// Deep-copies `inner` and allocates a FRESH empty cache; the clone never
+        /// shares the cache pointer or backing store with the source, so mutating
+        /// either side cannot corrupt the other. (Required by zeam_utils.clone,
+        /// which dispatches to this hook and pairs it with `deinit`.)
+        pub fn clone(self: *const Self, allocator: Allocator) !Self {
+            const c = try allocator.create(Cache);
+            errdefer allocator.destroy(c);
+            c.* = Cache.init();
+            errdefer c.deinit(allocator);
+            return .{ .inner = try self.inner.clone(allocator), .cache = c, .allocator = allocator };
+        }
+
+        // ---- Accessors forwarded to `inner` ----
+        // List-only methods (constSlice/slice/fromSlice) are generic and only
+        // semantically analyzed when actually called, so a Bitlist-backed
+        // TreeHasher (which lacks them) still compiles.
+
+        pub fn get(self: *const Self, i: usize) !Item {
+            return self.inner.get(i);
+        }
+
+        pub fn constSlice(self: *const Self) []const Item {
+            return self.inner.constSlice();
+        }
+
+        pub fn slice(self: *Self) []Item {
+            return self.inner.slice();
+        }
+
+        pub fn fromSlice(allocator: Allocator, m: []const Item) !Self {
+            const c = try allocator.create(Cache);
+            errdefer allocator.destroy(c);
+            c.* = Cache.init();
+            errdefer c.deinit(allocator);
+            return .{ .inner = try Inner.fromSlice(allocator, m), .cache = c, .allocator = allocator };
+        }
+
+        pub fn eql(self: *const Self, other: *const Self) bool {
+            return self.inner.eql(&other.inner);
+        }
     };
+}
+
+// ---- TreeHasher drop-in tests ----
+
+test "TreeHasher(List) parity with uncached List: serialize, hash, decode" {
+    const Sha256 = std.crypto.hash.sha2.Sha256;
+    const L = List(u64, 16);
+    const TH = TreeHasher(L, Sha256);
+    const a = std.testing.allocator;
+
+    var plain = try L.init(a);
+    defer plain.deinit();
+    var cached = try TH.init(a);
+    defer cached.deinit();
+
+    for ([_]u64{ 1, 2, 3, 4, 5 }) |v| {
+        try plain.append(v);
+        try cached.append(v);
+    }
+
+    var p_bytes: ArrayList(u8) = .empty;
+    defer p_bytes.deinit(a);
+    var c_bytes: ArrayList(u8) = .empty;
+    defer c_bytes.deinit(a);
+    try lib.serialize(L, plain, &p_bytes, a);
+    try lib.serialize(TH, cached, &c_bytes, a);
+    try std.testing.expectEqualSlices(u8, p_bytes.items, c_bytes.items);
+
+    var p_root: [32]u8 = undefined;
+    var c_root: [32]u8 = undefined;
+    try lib.hashTreeRoot(Sha256, L, plain, &p_root, a);
+    try lib.hashTreeRoot(Sha256, TH, cached, &c_root, a);
+    try std.testing.expectEqualSlices(u8, &p_root, &c_root);
+
+    var decoded: TH = undefined;
+    try lib.deserialize(TH, c_bytes.items, &decoded, a);
+    defer decoded.deinit();
+    var d_root: [32]u8 = undefined;
+    try lib.hashTreeRoot(Sha256, TH, decoded, &d_root, a);
+    try std.testing.expectEqualSlices(u8, &c_root, &d_root);
+}
+
+test "TreeHasher(Bitlist) parity with uncached Bitlist: serialize, hash, decode" {
+    const Sha256 = std.crypto.hash.sha2.Sha256;
+    const B = Bitlist(64);
+    const TH = TreeHasher(B, Sha256);
+    const a = std.testing.allocator;
+
+    var plain = try B.init(a);
+    defer plain.deinit();
+    var cached = try TH.init(a);
+    defer cached.deinit();
+
+    for ([_]bool{ true, false, true, true, false, false, true }) |bit| {
+        try plain.append(bit);
+        try cached.append(bit);
+    }
+
+    var p_bytes: ArrayList(u8) = .empty;
+    defer p_bytes.deinit(a);
+    var c_bytes: ArrayList(u8) = .empty;
+    defer c_bytes.deinit(a);
+    try lib.serialize(B, plain, &p_bytes, a);
+    try lib.serialize(TH, cached, &c_bytes, a);
+    try std.testing.expectEqualSlices(u8, p_bytes.items, c_bytes.items);
+
+    var p_root: [32]u8 = undefined;
+    var c_root: [32]u8 = undefined;
+    try lib.hashTreeRoot(Sha256, B, plain, &p_root, a);
+    try lib.hashTreeRoot(Sha256, TH, cached, &c_root, a);
+    try std.testing.expectEqualSlices(u8, &p_root, &c_root);
+
+    var decoded: TH = undefined;
+    try lib.deserialize(TH, c_bytes.items, &decoded, a);
+    defer decoded.deinit();
+    var d_root: [32]u8 = undefined;
+    try lib.hashTreeRoot(Sha256, TH, decoded, &d_root, a);
+    try std.testing.expectEqualSlices(u8, &c_root, &d_root);
+}
+
+test "TreeHasher(List) incremental append matches uncached at each step" {
+    const Sha256 = std.crypto.hash.sha2.Sha256;
+    const L = List(u64, 32);
+    const TH = TreeHasher(L, Sha256);
+    const a = std.testing.allocator;
+
+    var plain = try L.init(a);
+    defer plain.deinit();
+    var cached = try TH.init(a);
+    defer cached.deinit();
+
+    var v: u64 = 0;
+    while (v < 20) : (v += 1) {
+        try plain.append(v);
+        try cached.append(v);
+        var p_root: [32]u8 = undefined;
+        var c_root: [32]u8 = undefined;
+        try lib.hashTreeRoot(Sha256, L, plain, &p_root, a);
+        try lib.hashTreeRoot(Sha256, TH, cached, &c_root, a);
+        try std.testing.expectEqualSlices(u8, &p_root, &c_root);
+    }
+}
+
+test "TreeHasher(List) content-addressed refresh after direct slice mutation" {
+    const Sha256 = std.crypto.hash.sha2.Sha256;
+    const L = List(u64, 16);
+    const TH = TreeHasher(L, Sha256);
+    const a = std.testing.allocator;
+
+    var cached = try TH.init(a);
+    defer cached.deinit();
+    for ([_]u64{ 10, 20, 30, 40 }) |val| try cached.append(val);
+
+    var first: [32]u8 = undefined;
+    try lib.hashTreeRoot(Sha256, TH, cached, &first, a);
+
+    // Mutate the backing store directly (no markDirty).
+    cached.slice()[2] = 999;
+
+    var after: [32]u8 = undefined;
+    try lib.hashTreeRoot(Sha256, TH, cached, &after, a);
+    try std.testing.expect(!std.mem.eql(u8, &first, &after));
+
+    var plain = try L.init(a);
+    defer plain.deinit();
+    for ([_]u64{ 10, 20, 999, 40 }) |val| try plain.append(val);
+    var expected: [32]u8 = undefined;
+    try lib.hashTreeRoot(Sha256, L, plain, &expected, a);
+    try std.testing.expectEqualSlices(u8, &expected, &after);
+}
+
+test "TreeHasher(List) clone is independent (fresh cache, deep copy)" {
+    const Sha256 = std.crypto.hash.sha2.Sha256;
+    const L = List(u64, 16);
+    const TH = TreeHasher(L, Sha256);
+    const a = std.testing.allocator;
+
+    var orig = try TH.init(a);
+    defer orig.deinit();
+    for ([_]u64{ 1, 2, 3 }) |val| try orig.append(val);
+
+    var orig_root: [32]u8 = undefined;
+    try lib.hashTreeRoot(Sha256, TH, orig, &orig_root, a);
+
+    var cloned = try orig.clone(a);
+    defer cloned.deinit();
+
+    try std.testing.expect(cloned.cache != orig.cache);
+    try std.testing.expect(cloned.slice().ptr != orig.slice().ptr);
+
+    // Mutating the original must not change the clone.
+    try orig.append(4);
+    orig.slice()[0] = 100;
+    var mutated_orig: [32]u8 = undefined;
+    try lib.hashTreeRoot(Sha256, TH, orig, &mutated_orig, a);
+
+    var cloned_root: [32]u8 = undefined;
+    try lib.hashTreeRoot(Sha256, TH, cloned, &cloned_root, a);
+    try std.testing.expectEqualSlices(u8, &orig_root, &cloned_root);
+    try std.testing.expect(!std.mem.eql(u8, &mutated_orig, &cloned_root));
 }

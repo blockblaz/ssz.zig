@@ -72,6 +72,13 @@ pub fn List(T: type, comptime N: usize) type {
             const alloc = allocator orelse return error.AllocatorRequired;
             out.* = try init(alloc);
 
+            if (comptime Self.Item == u8) {
+                // route through deserialize's existing []u8 fast path
+                if (serialized.len > N) return error.OffsetExceedsSize;
+                try out.inner.resize(alloc, serialized.len);
+                return deserialize([]u8, serialized, &out.inner.items, null);
+            }
+
             // FastSSZ-style capacity optimization: pre-allocate based on input size
             // TODO: replace this with the definite value, taken from the list
             if (serialized.len > 0) {

@@ -73,10 +73,11 @@ pub fn List(T: type, comptime N: usize) type {
             out.* = try init(alloc);
 
             if (comptime Self.Item == u8) {
-                // route through deserialize's existing []u8 fast path
+                // bulk-copy fast path: bytes are their own SSZ encoding
                 if (serialized.len > N) return error.OffsetExceedsSize;
-                try out.inner.resize(alloc, serialized.len);
-                return deserialize([]u8, serialized, &out.inner.items, null);
+                try out.inner.ensureTotalCapacityPrecise(alloc, serialized.len);
+                out.inner.appendSliceAssumeCapacity(serialized);
+                return;
             }
 
             // FastSSZ-style capacity optimization: pre-allocate based on input size

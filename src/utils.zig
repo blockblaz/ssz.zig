@@ -72,6 +72,14 @@ pub fn List(T: type, comptime N: usize) type {
             const alloc = allocator orelse return error.AllocatorRequired;
             out.* = try init(alloc);
 
+            if (comptime Self.Item == u8) {
+                // bulk-copy fast path: bytes are their own SSZ encoding
+                if (serialized.len > N) return error.OffsetExceedsSize;
+                try out.inner.ensureTotalCapacityPrecise(alloc, serialized.len);
+                out.inner.appendSliceAssumeCapacity(serialized);
+                return;
+            }
+
             // FastSSZ-style capacity optimization: pre-allocate based on input size
             // TODO: replace this with the definite value, taken from the list
             if (serialized.len > 0) {

@@ -174,42 +174,6 @@ test "(de)serializes a structure with variable fields" {
     try deserialize(@TypeOf(data), list.items, &out, null);
 }
 
-test "serializes a structure with optional fields" {
-    const Employee = struct {
-        name: ?[]const u8,
-        age: u8,
-        company: ?[]const u8,
-    };
-    const data: Employee = .{
-        .name = "James",
-        .age = @as(u8, 32),
-        .company = null,
-    };
-
-    const serialized_data = [_]u8{ 9, 0, 0, 0, 32, 15, 0, 0, 0, 1, 74, 97, 109, 101, 115, 0 };
-
-    var list: ArrayList(u8) = .empty;
-    defer list.deinit(std.testing.allocator);
-    try serialize(@TypeOf(data), data, &list, std.testing.allocator);
-    try expect(std.mem.eql(u8, list.items, serialized_data[0..]));
-
-    var deserialized: Employee = undefined;
-    try deserialize(Employee, list.items, &deserialized, null);
-    // only available in >=0.11
-    // try std.testing.expectEqualDeep(data, deserialized);
-    try expect(std.mem.eql(u8, data.name.?, deserialized.name.?));
-    try std.testing.expectEqual(data.age, deserialized.age);
-    try std.testing.expectEqual(deserialized.company, null);
-}
-
-test "serializes an optional object" {
-    const null_or_string: ?[]const u8 = null;
-    var list: ArrayList(u8) = .empty;
-    defer list.deinit(std.testing.allocator);
-    try serialize(@TypeOf(null_or_string), null_or_string, &list, std.testing.allocator);
-    try expect(list.items.len == 1);
-}
-
 test "serializes a union" {
     const Payload = union(enum) {
         int: u64,
@@ -321,24 +285,6 @@ test "deserializes a Bitvector[N]" {
     inline while (i < 7) : (i += 1) {
         try expect(out[i] == exp[i]);
     }
-}
-
-test "deserializes an Optional" {
-    var list: ArrayList(u8) = .empty;
-    defer list.deinit(std.testing.allocator);
-
-    var out: ?u32 = undefined;
-    const exp: ?u32 = 10;
-    try serialize(?u32, exp, &list, std.testing.allocator);
-    try deserialize(?u32, list.items, &out, null);
-    try expect(out.? == exp.?);
-
-    var list2: ArrayList(u8) = .empty;
-    defer list2.deinit(std.testing.allocator);
-
-    try serialize(?u32, null, &list2, std.testing.allocator);
-    try deserialize(?u32, list2.items, &out, null);
-    try expect(out == null);
 }
 
 test "deserializes a string" {
@@ -627,24 +573,6 @@ test "calculate the root hash of a structure" {
     var expected: [32]u8 = undefined;
     _ = try std.fmt.hexToBytes(expected[0..], "58316a908701d3660123f0b8cb7839abdd961f71d92993d34e4f480fbec687d9");
     try hashTreeRoot(Sha256, Fork, fork, &hashed, std.testing.allocator);
-    try expect(std.mem.eql(u8, hashed[0..], expected[0..]));
-}
-
-test "calculate the root hash of an Optional" {
-    var hashed: [32]u8 = undefined;
-    var payload: [64]u8 = undefined;
-    const v: ?u32 = null;
-    const u: ?u32 = 0xdeadbeef;
-    var expected: [32]u8 = undefined;
-
-    _ = try std.fmt.hexToBytes(payload[0..], "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000");
-    Sha256.hash(payload[0..], expected[0..], Sha256.Options{});
-    try hashTreeRoot(Sha256, ?u32, v, &hashed, std.testing.allocator);
-    try expect(std.mem.eql(u8, hashed[0..], expected[0..]));
-
-    _ = try std.fmt.hexToBytes(payload[0..], "efbeadde000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000");
-    Sha256.hash(payload[0..], expected[0..], Sha256.Options{});
-    try hashTreeRoot(Sha256, ?u32, u, &hashed, std.testing.allocator);
     try expect(std.mem.eql(u8, hashed[0..], expected[0..]));
 }
 

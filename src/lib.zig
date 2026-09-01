@@ -23,7 +23,6 @@ pub fn serializedFixedSize(T: type) !usize {
             // or should we just throw error for all of pointer
             else => serializedFixedSize(info.pointer.child),
         },
-        .optional => error.NoSerializedFixedSizeAvailable,
         .null => @as(usize, 0),
         .@"struct" => |str| size: {
             var size: usize = 0;
@@ -74,10 +73,6 @@ pub fn serializedSize(T: type, data: T) !usize {
             },
             else => serializedSize(info.pointer.child, data.*),
         },
-        .optional => if (data == null)
-            @as(usize, 1)
-        else
-            1 + try serializedSize(info.optional.child, data.?),
         .null => @as(usize, 0),
         .@"struct" => |str| size: {
             var size: usize = 0;
@@ -109,7 +104,6 @@ pub fn isFixedSizeObject(T: type) !bool {
                 return false;
             }
         },
-        .optional => return false,
         .pointer => |ptr| switch (ptr.size) {
             .many, .slice, .c => return false,
             .one => return isFixedSizeObject(info.pointer.child),
@@ -142,7 +136,6 @@ pub fn maxInLength(T: type) !usize {
                 break :blk array.len * child_max + 4 * array.len;
             }
         },
-        .optional => 1 + try maxInLength(info.optional.child),
         .pointer => |ptr| switch (ptr.size) {
             .slice => error.NoMaxInLengthAvailable,
             .one => maxInLength(ptr.child),
@@ -190,7 +183,6 @@ pub fn minInLength(T: type) !usize {
             array.len * try minInLength(array.child)
         else
             array.len * @sizeOf(u32) + array.len * try minInLength(array.child),
-        .optional => 1,
         .pointer => |ptr| switch (ptr.size) {
             .slice => error.NoMinInLengthAvailable,
             .one => minInLength(ptr.child),
@@ -382,15 +374,6 @@ pub fn serialize(T: type, data: T, l: *ArrayList(u8), allocator: Allocator) !voi
         },
         // Nothing to be added to the payload
         .null => {},
-        // Optionals are like unions, but their 0 value has to be 0.
-        .optional => {
-            if (data != null) {
-                _ = try l.append(allocator, 1);
-                try serialize(info.optional.child, data.?, l, allocator);
-            } else {
-                _ = try l.append(allocator, 0);
-            }
-        },
         .@"union" => {
             if (info.@"union".tag_type == null) {
                 return error.UnionIsNotTagged;
@@ -478,16 +461,6 @@ pub fn deserialize(T: type, serialized: []const u8, out: *T, allocator: ?Allocat
         .int => {
             const N = @sizeOf(T);
             out.* = std.mem.readInt(T, serialized[0..N], std.builtin.Endian.little);
-        },
-        .optional => {
-            const index: u8 = serialized[0];
-            if (index != 0) {
-                var x: info.optional.child = undefined;
-                try deserialize(info.optional.child, serialized[1..], &x, allocator);
-                out.* = x;
-            } else {
-                out.* = null;
-            }
         },
         .pointer => |ptr| switch (ptr.size) {
             .slice => if (@sizeOf(ptr.child) == 1) {
@@ -1003,14 +976,6 @@ pub fn hashTreeRoot(Hasher: type, T: type, value: T, out: *[Hasher.digest_length
                 try chunks.append(allocator, tmp);
             }
             try merkleize(Hasher, chunks.items, null, out);
-        },
-        // An optional is a union with `None` as first value.
-        .optional => |opt| if (value != null) {
-            var tmp: chunk = undefined;
-            try hashTreeRoot(Hasher, opt.child, value.?, &tmp, allocator);
-            mixInSelector(Hasher, tmp, 1, out);
-        } else {
-            mixInSelector(Hasher, zero_chunk, 0, out);
         },
         .@"union" => |u| {
             if (u.tag_type == null) {

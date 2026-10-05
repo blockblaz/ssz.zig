@@ -267,7 +267,7 @@ pub fn List(T: type, comptime N: usize) type {
                 return error.DynamicLengthTooShort;
             }
 
-            const offset = std.mem.readInt(u32, buf[0..4], std.builtin.Endian.little);
+            const offset = std.mem.readInt(u32, buf[0..4], std.lang.Endian.little);
             if (offset % OFFSET_SIZE != 0 or offset == 0) {
                 return error.DynamicLengthNotOffsetSized;
             }

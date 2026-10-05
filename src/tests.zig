@@ -270,7 +270,7 @@ test "(de)serializes a type with a custom serialization method" {
         }
     };
 
-    var before: MyCustomSerializingType = .{ .len = 10, .buffer = [_]u8{0} ** 100 };
+    var before: MyCustomSerializingType = .{ .len = 10, .buffer = @splat(0) };
     before.buffer[0] = 1;
     before.buffer[9] = 100;
 
@@ -433,7 +433,7 @@ test "deserializes an union" {
 test "serialize/deserialize a u256" {
     var list: ArrayList(u8) = .empty;
     defer list.deinit(std.testing.allocator);
-    const data = [_]u8{0xAA} ** 32;
+    const data: [32]u8 = @splat(0xAA);
     var output: [32]u8 = undefined;
 
     try serialize([32]u8, data, &list, std.testing.allocator);
@@ -517,12 +517,12 @@ fn bytesToBits(comptime N: usize, src: [N]u8) [N * 8]bool {
     return bitvector;
 }
 
-const a_bytes = [_]u8{0xaa} ** 16;
-const b_bytes = [_]u8{0xbb} ** 16;
-const c_bytes = [_]u8{0xcc} ** 16;
-const d_bytes = [_]u8{0xdd} ** 16;
-const e_bytes = [_]u8{0xee} ** 16;
-const empty_bytes = [_]u8{0} ** 16;
+const a_bytes: [16]u8 = @splat(0xaa);
+const b_bytes: [16]u8 = @splat(0xbb);
+const c_bytes: [16]u8 = @splat(0xcc);
+const d_bytes: [16]u8 = @splat(0xdd);
+const e_bytes: [16]u8 = @splat(0xee);
+const empty_bytes: [16]u8 = @splat(0);
 
 const a_bits = bytesToBits(16, a_bytes);
 const b_bits = bytesToBits(16, b_bytes);
@@ -531,7 +531,7 @@ const d_bits = bytesToBits(16, d_bytes);
 const e_bits = bytesToBits(16, e_bytes);
 
 test "calculate the root hash of a boolean" {
-    var expected = [_]u8{1} ++ [_]u8{0} ** 31;
+    var expected = [_]u8{1} ++ @as([31]u8, @splat(0));
     var hashed: [32]u8 = undefined;
     try hashTreeRoot(Sha256, bool, true, &hashed, std.testing.allocator);
     try expect(std.mem.eql(u8, hashed[0..], expected[0..]));
@@ -554,7 +554,7 @@ test "calculate root hash of an array of two Bitvector[128]" {
 }
 
 test "calculate the root hash of an array of integers" {
-    var expected = [_]u8{ 0xef, 0xbe, 0xad, 0xde, 0xfe, 0xca, 0xfe, 0xca } ++ [_]u8{0} ** 24;
+    var expected = [_]u8{ 0xef, 0xbe, 0xad, 0xde, 0xfe, 0xca, 0xfe, 0xca } ++ @as([24]u8, @splat(0));
     var hashed: [32]u8 = undefined;
     try hashTreeRoot(Sha256, [2]u32, [_]u32{ 0xdeadbeef, 0xcafecafe }, &hashed, std.testing.allocator);
     try expect(std.mem.eql(u8, hashed[0..], expected[0..]));
@@ -568,7 +568,7 @@ test "calculate root hash of an array of three Bitvector[128]" {
     var left: [32]u8 = undefined;
     var expected: [32]u8 = undefined;
     const preimg1 = a_bytes ++ empty_bytes ++ b_bytes ++ empty_bytes;
-    const preimg2 = c_bytes ++ empty_bytes ** 3;
+    const preimg2 = c_bytes ++ empty_bytes ++ empty_bytes ++ empty_bytes;
     Sha256.hash(preimg1[0..], &left, Sha256.Options{});
     Sha256.hash(preimg2[0..], &expected, Sha256.Options{});
     var digest = Sha256.init(Sha256.Options{});
@@ -589,8 +589,8 @@ test "calculate the root hash of an array of five Bitvector[128]" {
     var expected: [32]u8 = undefined;
     const preimg1 = a_bytes ++ empty_bytes ++ b_bytes ++ empty_bytes;
     const preimg2 = c_bytes ++ empty_bytes ++ d_bytes ++ empty_bytes;
-    const preimg3 = e_bytes ++ empty_bytes ** 3;
-    const preimg4 = empty_bytes ** 4;
+    const preimg3 = e_bytes ++ empty_bytes ++ empty_bytes ++ empty_bytes;
+    const preimg4 = empty_bytes ++ empty_bytes ++ empty_bytes ++ empty_bytes;
 
     Sha256.hash(preimg1[0..], &left, Sha256.Options{});
     Sha256.hash(preimg2[0..], internal_nodes[0..32], Sha256.Options{});
@@ -690,7 +690,7 @@ test "(de)serialize List[N] of variable-length objects" {
     var string_list = try ListOfStrings.init(std.testing.allocator);
     defer string_list.deinit();
     for (0..10) |i| {
-        try string_list.append(try std.fmt.allocPrint(std.testing.allocator, "count={}", .{i}));
+        try string_list.append(try std.testing.allocator.print("count={}", .{i}));
     }
     defer for (0..string_list.len()) |i| {
         std.testing.allocator.free(string_list.get(i) catch unreachable);
@@ -846,7 +846,7 @@ test "structs with nested fixed/variable size u8 array" {
             .state_root = [_]u8{ 81, 12, 244, 147, 45, 160, 28, 192, 208, 78, 159, 151, 165, 43, 244, 44, 103, 197, 231, 128, 122, 15, 182, 90, 109, 10, 229, 68, 229, 60, 50, 231 },
             .body = .{ .slot = 9, .data = [_]u8{ 1, 2, 3, 4 } },
         },
-        .signature = [_]u8{2} ** 48,
+        .signature = @splat(2),
     };
     var serialized_fixed_block: ArrayList(u8) = .empty;
     defer serialized_fixed_block.deinit(std.testing.allocator);
@@ -895,7 +895,7 @@ test "structs with nested fixed/variable size u8 array" {
             .state_root = [_]u8{ 81, 12, 244, 147, 45, 160, 28, 192, 208, 78, 159, 151, 165, 43, 244, 44, 103, 197, 231, 128, 122, 15, 182, 90, 109, 10, 229, 68, 229, 60, 50, 231 },
             .body = .{ .slot = 9, .data = &varData },
         },
-        .signature = [_]u8{2} ** 48,
+        .signature = @splat(2),
     };
 
     var serialized_var_block: ArrayList(u8) = .empty;
@@ -923,7 +923,7 @@ test "structs with nested fixed/variable size u8 array" {
 test "slice hashtree root composite type" {
     const Root = [32]u8;
     const RootsList = []Root;
-    const test_root = [_]u8{23} ** 32;
+    const test_root: Root = @splat(23);
     // merkelizes as List[Root,1] as dynamic data length is mixed in as bounded type
     var roots_list = [_]Root{test_root};
 
@@ -943,7 +943,7 @@ test "slice hashtree root composite type" {
 test "slice hashtree root simple type" {
     const DynamicRoot = []u8;
     // merkelizes as List[u8,33] as dynamic data length is mixed in as bounded type
-    var test_root = [_]u8{23} ** 33;
+    var test_root: [33]u8 = @splat(23);
 
     var hash_root: [32]u8 = undefined;
     try hashTreeRoot(
@@ -1295,7 +1295,7 @@ test "zeam stf input" {
     };
 
     const config = BeamStateConfig{ .num_validators = 4 };
-    const genesis_root = [_]u8{9} ** 32;
+    const genesis_root: Bytes32 = @splat(9);
     var justifications_roots = [_]Bytes32{genesis_root};
     var justifications_validators = [_]u8{ 0, 1, 1, 1 };
 
@@ -1306,13 +1306,13 @@ test "zeam stf input" {
         .latest_block_header = .{
             .slot = 0,
             .proposer_index = 0,
-            .parent_root = [_]u8{1} ** 32,
-            .state_root = [_]u8{2} ** 32,
-            .body_root = [_]u8{3} ** 32,
+            .parent_root = @splat(1),
+            .state_root = @splat(2),
+            .body_root = @splat(3),
         },
         // mini3sf
-        .latest_justified = .{ .root = [_]u8{5} ** 32, .slot = 0 },
-        .latest_finalized = .{ .root = [_]u8{4} ** 32, .slot = 0 },
+        .latest_justified = .{ .root = @splat(5), .slot = 0 },
+        .latest_finalized = .{ .root = @splat(4), .slot = 0 },
         .historical_block_hashes = &[_]Bytes32{},
         .justified_slots = &[_]u8{},
         .justifications_roots = &justifications_roots,
@@ -1327,7 +1327,7 @@ test "zeam stf input" {
             .state_root = [_]u8{ 81, 12, 244, 147, 45, 160, 28, 192, 208, 78, 159, 151, 165, 43, 244, 44, 103, 197, 231, 128, 122, 15, 182, 90, 109, 10, 229, 68, 229, 60, 50, 231 },
             .body = .{ .execution_payload_header = ExecutionPayloadHeader{ .timestamp = 23 }, .votes = &[_]Mini3SFVote{} },
         },
-        .signature = [_]u8{2} ** 48,
+        .signature = @splat(2),
     };
 
     const prover_input = BeamSTFProverInput{
@@ -1375,7 +1375,7 @@ test "serialize max/min integer values" {
     defer list.deinit(std.testing.allocator);
     try serialize(u64, max_u64, &list, std.testing.allocator);
     try expect(list.items.len == 8);
-    try expect(std.mem.eql(u8, list.items, &[_]u8{0xFF} ** 8));
+    try expect(std.mem.eql(u8, list.items, &@as([8]u8, @splat(0xFF))));
 
     // Min i64 (most negative)
     const min_i64: i64 = std.math.minInt(i64);
@@ -1484,7 +1484,7 @@ test "Array hash tree root" {
 
 test "Large Bitvector serialization and hash" {
     const LargeBitvec = [512]bool;
-    var data: LargeBitvec = [_]bool{false} ** 512;
+    var data: LargeBitvec = @splat(false);
 
     // Set some bits
     data[0] = true;
@@ -1698,7 +1698,7 @@ test "Zero-length array" {
     var hash: [32]u8 = undefined;
     try hashTreeRoot(Sha256, [0]u32, empty, &hash, std.testing.allocator);
     // Should be the zero chunk
-    try expect(std.mem.eql(u8, &hash, &([_]u8{0} ** 32)));
+    try expect(std.mem.eql(u8, &hash, &@as([32]u8, @splat(0))));
 }
 
 // SSZ Validation Tests
@@ -2163,7 +2163,7 @@ test "nested dynamic list uses relative offsets" {
     try inner_list.append(item2);
 
     const outer = OuterStruct{
-        .fixed_field = [_]u8{0xAB} ** 32,
+        .fixed_field = @splat(0xAB),
         .dynamic_list = inner_list,
     };
 
@@ -2198,7 +2198,7 @@ test "nested dynamic array uses relative offsets" {
     const item2: []const u8 = "barbaz";
 
     const outer = OuterStruct{
-        .fixed_field = [_]u8{0xCD} ** 16,
+        .fixed_field = @splat(0xCD),
         .dynamic_array = .{ item1, item2 },
     };
 
@@ -2242,7 +2242,7 @@ test "deeply nested dynamic structures use relative offsets" {
     try outer_list.append(inner2);
 
     const container = Container{
-        .prefix = [_]u8{0xFF} ** 8,
+        .prefix = @splat(0xFF),
         .nested_lists = outer_list,
     };
 
@@ -2424,7 +2424,7 @@ test "deserialize struct: fixed-field read past buffer" {
         b: u32,
         c: []const u8,
     };
-    const buf = [_]u8{0} ** 10;
+    const buf: [10]u8 = @splat(0);
     var out: S = undefined;
     try expectError(error.OffsetExceedsSize, deserialize(S, &buf, &out, std.testing.allocator));
 }
@@ -2568,7 +2568,7 @@ test "utils.List fixed-size item: ragged serialized length" {
     const L = utils.List(u64, 4);
     var out: L = undefined;
     defer out.deinit();
-    const buf = [_]u8{0} ** 9;
+    const buf: [9]u8 = @splat(0);
     try expectError(error.OffsetOrdering, L.sszDecode(buf[0..], &out, std.testing.allocator));
 }
 
@@ -2576,13 +2576,13 @@ test "utils.List fixed-size item: element count exceeds N" {
     const L = utils.List(u64, 2);
     var out: L = undefined;
     defer out.deinit();
-    const buf = [_]u8{0} ** 24;
+    const buf: [24]u8 = @splat(0);
     try expectError(error.OffsetExceedsSize, L.sszDecode(buf[0..], &out, std.testing.allocator));
 }
 
 test "deserialize variable array: buffer smaller than offset prefix" {
     var out: [1][]const u8 = undefined;
-    const buf = [_]u8{0} ** 3;
+    const buf: [3]u8 = @splat(0);
     try expectError(error.OffsetExceedsSize, deserialize([1][]const u8, &buf, &out, std.testing.allocator));
 }
 
@@ -2596,7 +2596,7 @@ test "deserialize variable array: offset in table past buffer" {
 
 test "deserialize variable slice of slices: buffer smaller than first offset slot" {
     var out: [][]const u8 = undefined;
-    const buf = [_]u8{0} ** 3;
+    const buf: [3]u8 = @splat(0);
     try expectError(error.OffsetExceedsSize, deserialize([][]const u8, &buf, &out, std.testing.allocator));
 }
 
@@ -2643,7 +2643,7 @@ test "deserialize struct: bool/int field truncated below @sizeOf" {
         a: u32,
         b: []const u8,
     };
-    const buf = [_]u8{0} ** 3;
+    const buf: [3]u8 = @splat(0);
     var out: S = undefined;
     try expectError(error.OffsetExceedsSize, deserialize(S, &buf, &out, std.testing.allocator));
 }
@@ -2653,7 +2653,7 @@ test "deserialize struct: fixed-size composite field truncated" {
         a: [4]u32,
         b: []const u8,
     };
-    const buf = [_]u8{0} ** 10;
+    const buf: [10]u8 = @splat(0);
     var out: S = undefined;
     try expectError(error.OffsetExceedsSize, deserialize(S, &buf, &out, std.testing.allocator));
 }

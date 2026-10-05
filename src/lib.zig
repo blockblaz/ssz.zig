@@ -5,7 +5,6 @@ const std = @import("std");
 pub const utils = @import("./utils.zig");
 pub const zeros = @import("./zeros.zig");
 const ArrayList = std.ArrayList;
-const builtin = std.builtin;
 const Allocator = std.mem.Allocator;
 const Sha256 = std.crypto.hash.sha2.Sha256;
 
@@ -27,8 +26,8 @@ pub fn serializedFixedSize(T: type) !usize {
         .null => @as(usize, 0),
         .@"struct" => |str| size: {
             var size: usize = 0;
-            inline for (str.fields) |field| {
-                size += try serializedFixedSize(field.type);
+            inline for (str.field_types) |field_type| {
+                size += try serializedFixedSize(field_type);
             }
             break :size size;
         },
@@ -81,12 +80,12 @@ pub fn serializedSize(T: type, data: T) !usize {
         .null => @as(usize, 0),
         .@"struct" => |str| size: {
             var size: usize = 0;
-            inline for (str.fields) |field| {
-                const is_field_fixed_size = try isFixedSizeObject(field.type);
+            inline for (str.field_names, str.field_types) |field_name, field_type| {
+                const is_field_fixed_size = try isFixedSizeObject(field_type);
                 if (is_field_fixed_size == false) {
                     size += 4;
                 }
-                size += try serializedSize(field.type, @field(data, field.name));
+                size += try serializedSize(field_type, @field(data, field_name));
             }
             break :size size;
         },
@@ -104,8 +103,8 @@ pub fn isFixedSizeObject(T: type) !bool {
     switch (info) {
         .bool, .int, .null => return true,
         .array => return isFixedSizeObject(info.array.child),
-        .@"struct" => |str| inline for (str.fields) |field| {
-            if (!try isFixedSizeObject(field.type)) {
+        .@"struct" => |str| inline for (str.field_types) |field_type| {
+            if (!try isFixedSizeObject(field_type)) {
                 return false;
             }
         },
@@ -150,11 +149,11 @@ pub fn maxInLength(T: type) !usize {
         },
         .@"struct" => |str| blk: {
             var total: usize = 0;
-            inline for (str.fields) |field| {
-                if (try isFixedSizeObject(field.type)) {
-                    total += try maxInLength(field.type);
+            inline for (str.field_types) |field_type| {
+                if (try isFixedSizeObject(field_type)) {
+                    total += try maxInLength(field_type);
                 } else {
-                    total += 4 + try maxInLength(field.type);
+                    total += 4 + try maxInLength(field_type);
                 }
             }
             break :blk total;
@@ -162,8 +161,8 @@ pub fn maxInLength(T: type) !usize {
         .@"union" => |u| blk: {
             if (u.tag_type == null) return error.UnionIsNotTagged;
             var m: usize = 0;
-            inline for (u.fields) |f| {
-                const n = try maxInLength(f.type);
+            inline for (u.field_types) |field_type| {
+                const n = try maxInLength(field_type);
                 if (n > m) m = n;
             }
             break :blk 1 + m;
@@ -198,11 +197,11 @@ pub fn minInLength(T: type) !usize {
         },
         .@"struct" => |str| blk: {
             var total: usize = 0;
-            inline for (str.fields) |field| {
-                if (try isFixedSizeObject(field.type)) {
-                    total += try minInLength(field.type);
+            inline for (str.field_types) |field_type| {
+                if (try isFixedSizeObject(field_type)) {
+                    total += try minInLength(field_type);
                 } else {
-                    total += 4 + try minInLength(field.type);
+                    total += 4 + try minInLength(field_type);
                 }
             }
             break :blk total;
@@ -210,8 +209,8 @@ pub fn minInLength(T: type) !usize {
         .@"union" => |u| blk: {
             if (u.tag_type == null) return error.UnionIsNotTagged;
             var m: usize = std.math.maxInt(usize);
-            inline for (u.fields) |f| {
-                const n = try minInLength(f.type);
+            inline for (u.field_types) |field_type| {
+                const n = try minInLength(field_type);
                 if (n < m) m = n;
             }
             break :blk 1 + m;
@@ -271,7 +270,7 @@ pub fn serialize(T: type, data: T, l: *ArrayList(u8), allocator: Allocator) !voi
                     // The offset is relative to the start of this array's data.
                     for (data) |item| {
                         const relative_offset = l.items.len - base;
-                        std.mem.writeInt(u32, l.items[start .. start + 4][0..4], @truncate(relative_offset), std.builtin.Endian.little);
+                        std.mem.writeInt(u32, l.items[start .. start + 4][0..4], @truncate(relative_offset), std.lang.Endian.little);
                         _ = try serialize(array.child, item, l, allocator);
                         start += 4;
                     }
@@ -320,7 +319,7 @@ pub fn serialize(T: type, data: T, l: *ArrayList(u8), allocator: Allocator) !voi
                             // The offset is relative to the start of this slice's data.
                             for (data) |item| {
                                 const relative_offset = l.items.len - base;
-                                std.mem.writeInt(u32, l.items[start .. start + 4][0..4], @truncate(relative_offset), std.builtin.Endian.little);
+                                std.mem.writeInt(u32, l.items[start .. start + 4][0..4], @truncate(relative_offset), std.lang.Endian.little);
                                 _ = try serialize(pointer.child, item, l, allocator);
                                 start += 4;
                             }
@@ -331,15 +330,15 @@ pub fn serialize(T: type, data: T, l: *ArrayList(u8), allocator: Allocator) !voi
                 else => return error.UnSupportedPointerType,
             }
         },
-        .@"struct" => {
+        .@"struct" => |str| {
             // First pass, accumulate the fixed sizes
             comptime var var_start = 0;
-            inline for (info.@"struct".fields) |field| {
+            inline for (str.field_types) |field_type| {
                 comptime {
-                    if (@typeInfo(field.type) == .int or @typeInfo(field.type) == .bool) {
-                        var_start += @sizeOf(field.type);
-                    } else if (try isFixedSizeObject(field.type)) {
-                        var_start += try serializedFixedSize(field.type);
+                    if (@typeInfo(field_type) == .int or @typeInfo(field_type) == .bool) {
+                        var_start += @sizeOf(field_type);
+                    } else if (try isFixedSizeObject(field_type)) {
+                        var_start += try serializedFixedSize(field_type);
                     } else {
                         var_start += 4;
                     }
@@ -348,17 +347,17 @@ pub fn serialize(T: type, data: T, l: *ArrayList(u8), allocator: Allocator) !voi
 
             // Second pass: intertwine fixed fields and variables offsets
             var var_acc = @as(usize, var_start); // variable part size accumulator
-            inline for (info.@"struct".fields) |field| {
-                switch (@typeInfo(field.type)) {
+            inline for (str.field_names, str.field_types) |field_name, field_type| {
+                switch (@typeInfo(field_type)) {
                     .int, .bool => {
-                        try serialize(field.type, @field(data, field.name), l, allocator);
+                        try serialize(field_type, @field(data, field_name), l, allocator);
                     },
                     else => {
-                        if (try isFixedSizeObject(field.type)) {
-                            try serialize(field.type, @field(data, field.name), l, allocator);
+                        if (try isFixedSizeObject(field_type)) {
+                            try serialize(field_type, @field(data, field_name), l, allocator);
                         } else {
                             try serialize(u32, @truncate(var_acc), l, allocator);
-                            var_acc += try serializedSize(field.type, @field(data, field.name));
+                            var_acc += try serializedSize(field_type, @field(data, field_name));
                         }
                     },
                 }
@@ -366,14 +365,14 @@ pub fn serialize(T: type, data: T, l: *ArrayList(u8), allocator: Allocator) !voi
 
             // Third pass: add variable fields at the end
             if (var_acc > var_start) {
-                inline for (info.@"struct".fields) |field| {
-                    switch (@typeInfo(field.type)) {
+                inline for (str.field_names, str.field_types) |field_name, field_type| {
+                    switch (@typeInfo(field_type)) {
                         .int, .bool => {
                             // skip fixed-size fields
                         },
                         else => {
-                            if (!try isFixedSizeObject(field.type)) {
-                                try serialize(field.type, @field(data, field.name), l, allocator);
+                            if (!try isFixedSizeObject(field_type)) {
+                                try serialize(field_type, @field(data, field_name), l, allocator);
                             }
                         },
                     }
@@ -391,14 +390,14 @@ pub fn serialize(T: type, data: T, l: *ArrayList(u8), allocator: Allocator) !voi
                 _ = try l.append(allocator, 0);
             }
         },
-        .@"union" => {
-            if (info.@"union".tag_type == null) {
+        .@"union" => |u| {
+            if (u.tag_type == null) {
                 return error.UnionIsNotTagged;
             }
-            inline for (info.@"union".fields, 0..) |f, index| {
-                if (@intFromEnum(data) == index) {
+            inline for (u.field_names, u.field_types, 0..) |field_name, field_type, index| {
+                if (@backingInt(data) == index) {
                     _ = std.mem.writeInt(u8, try l.addManyAsArray(allocator, 1), index, .little);
-                    try serialize(f.type, @field(data, f.name), l, allocator);
+                    try serialize(field_type, @field(data, field_name), l, allocator);
                     return;
                 }
             }
@@ -477,7 +476,7 @@ pub fn deserialize(T: type, serialized: []const u8, out: *T, allocator: ?Allocat
         .bool => out.* = (serialized[0] == 1),
         .int => {
             const N = @sizeOf(T);
-            out.* = std.mem.readInt(T, serialized[0..N], std.builtin.Endian.little);
+            out.* = std.mem.readInt(T, serialized[0..N], std.lang.Endian.little);
         },
         .optional => {
             const index: u8 = serialized[0];
@@ -493,7 +492,7 @@ pub fn deserialize(T: type, serialized: []const u8, out: *T, allocator: ?Allocat
             .slice => if (@sizeOf(ptr.child) == 1) {
                 // Data is not copied in this function, copy is therefore
                 // the responsibility of the caller.
-                if (ptr.is_const) {
+                if (ptr.attrs.@"const") {
                     out.* = serialized[0..];
                 } else {
                     if (allocator) |alloc| {
@@ -568,16 +567,16 @@ pub fn deserialize(T: type, serialized: []const u8, out: *T, allocator: ?Allocat
             },
             else => return error.UnSupportedPointerType,
         },
-        .@"struct" => {
+        .@"struct" => |str| {
             // Calculate the number of variable fields in the
             // struct.
             comptime var n_var_fields = 0;
             comptime {
-                for (info.@"struct".fields) |field| {
-                    switch (@typeInfo(field.type)) {
+                for (str.field_types) |field_type| {
+                    switch (@typeInfo(field_type)) {
                         .int, .bool => {},
                         else => {
-                            if (!try isFixedSizeObject(field.type)) {
+                            if (!try isFixedSizeObject(field_type)) {
                                 n_var_fields += 1;
                             }
                         },
@@ -594,20 +593,20 @@ pub fn deserialize(T: type, serialized: []const u8, out: *T, allocator: ?Allocat
             // field.
             var i: usize = 0;
             comptime var variable_field_index = 0;
-            inline for (info.@"struct".fields) |field| {
-                switch (@typeInfo(field.type)) {
+            inline for (str.field_names, str.field_types) |field_name, field_type| {
+                switch (@typeInfo(field_type)) {
                     .bool, .int => {
                         // Direct deserialize
-                        if (i + @sizeOf(field.type) > serialized.len) return error.OffsetExceedsSize;
-                        try deserialize(field.type, serialized[i .. i + @sizeOf(field.type)], &@field(out.*, field.name), allocator);
-                        i += @sizeOf(field.type);
+                        if (i + @sizeOf(field_type) > serialized.len) return error.OffsetExceedsSize;
+                        try deserialize(field_type, serialized[i .. i + @sizeOf(field_type)], &@field(out.*, field_name), allocator);
+                        i += @sizeOf(field_type);
                     },
                     else => {
-                        if (try comptime isFixedSizeObject(field.type)) {
+                        if (try comptime isFixedSizeObject(field_type)) {
                             // Direct deserialize
-                            const field_serialized_size = try serializedFixedSize(field.type);
+                            const field_serialized_size = try serializedFixedSize(field_type);
                             if (i + field_serialized_size > serialized.len) return error.OffsetExceedsSize;
-                            try deserialize(field.type, serialized[i .. i + field_serialized_size], &@field(out.*, field.name), allocator);
+                            try deserialize(field_type, serialized[i .. i + field_serialized_size], &@field(out.*, field_name), allocator);
                             i += field_serialized_size;
                         } else {
                             if (i + 4 > serialized.len) return error.OffsetExceedsSize;
@@ -622,46 +621,46 @@ pub fn deserialize(T: type, serialized: []const u8, out: *T, allocator: ?Allocat
             // Second pass, deserialize each variable-sized value
             // now that their offset is known.
             comptime var last_index = 0;
-            inline for (info.@"struct".fields) |field| {
+            inline for (str.field_names, str.field_types, str.field_attrs) |field_name, field_type, field_attrs| {
                 // comptime fields are currently not supported, and it's not even
                 // certain that they can ever be without a change in the language.
-                if (field.is_comptime) @compileError("structure contains comptime field");
+                if (field_attrs.@"comptime") @compileError("structure contains comptime field");
 
-                switch (@typeInfo(field.type)) {
+                switch (@typeInfo(field_type)) {
                     .bool, .int => {}, // covered by the previous pass
-                    else => if (!try comptime isFixedSizeObject(field.type)) {
+                    else => if (!try comptime isFixedSizeObject(field_type)) {
                         const start = @as(usize, indices[last_index]);
                         const end: usize = if (last_index == n_var_fields - 1) serialized.len else @as(usize, indices[last_index + 1]);
                         if (start > serialized.len or end > serialized.len) return error.OffsetExceedsSize;
                         if (start > end) return error.OffsetOrdering;
                         if (last_index > 0 and start < @as(usize, indices[last_index - 1])) return error.OffsetOrdering;
                         if (last_index == 0 and start != i) return error.OffsetOrdering;
-                        try deserialize(field.type, serialized[start..end], &@field(out.*, field.name), allocator);
+                        try deserialize(field_type, serialized[start..end], &@field(out.*, field_name), allocator);
                         last_index += 1;
                     },
                 }
             }
         },
-        .@"union" => {
+        .@"union" => |u| {
             if (serialized.len < 1) return error.OffsetExceedsSize;
             // Read the type index
             var union_index: u8 = undefined;
             try deserialize(u8, serialized[0..1], &union_index, allocator);
 
-            if (union_index >= @as(u8, @intCast(info.@"union".fields.len))) {
+            if (union_index >= @as(u8, @intCast(u.field_names.len))) {
                 return error.InvalidUnionSelector;
             }
 
             // Use the index to figure out which type must
             // be deserialized.
-            inline for (info.@"union".fields, 0..) |field, index| {
+            inline for (u.field_names, u.field_types, 0..) |field_name, field_type, index| {
                 if (index == union_index) {
-                    // &@field(out.*, field.name) can not be used directly,
+                    // &@field(out.*, field_name) can not be used directly,
                     // because this field type hasn't been activated at this
                     // stage.
-                    var data: field.type = undefined;
-                    try deserialize(field.type, serialized[1..], &data, allocator);
-                    out.* = @unionInit(T, field.name, data);
+                    var data: field_type = undefined;
+                    try deserialize(field_type, serialized[1..], &data, allocator);
+                    out.* = @unionInit(T, field_name, data);
                 }
             }
         },
@@ -673,8 +672,8 @@ pub fn mixInLength2(Hasher: type, root: [Hasher.digest_length]u8, length: usize,
     var hasher = Hasher.init(Hasher.Options{});
     hasher.update(root[0..]);
 
-    var tmp = [_]u8{0} ** 32;
-    std.mem.writeInt(@TypeOf(length), tmp[0..@sizeOf(@TypeOf(length))], length, std.builtin.Endian.little);
+    var tmp: [32]u8 = @splat(0);
+    std.mem.writeInt(@TypeOf(length), tmp[0..@sizeOf(@TypeOf(length))], length, std.lang.Endian.little);
     hasher.update(tmp[0..]);
     hasher.final(out[0..]);
 }
@@ -702,8 +701,8 @@ test "mixInLength" {
 fn mixInSelector(Hasher: type, root: [Hasher.digest_length]u8, comptime selector: usize, out: *[Hasher.digest_length]u8) void {
     var hasher = Hasher.init(Hasher.Options{});
     hasher.update(root[0..]);
-    var tmp = [_]u8{0} ** 32;
-    std.mem.writeInt(@TypeOf(selector), tmp[0..@sizeOf(@TypeOf(selector))], selector, std.builtin.Endian.little);
+    var tmp: [32]u8 = @splat(0);
+    std.mem.writeInt(@TypeOf(selector), tmp[0..@sizeOf(@TypeOf(selector))], selector, std.lang.Endian.little);
     hasher.update(tmp[0..]);
     hasher.final(out[0..]);
 }
@@ -735,13 +734,13 @@ pub fn chunkCount(T: type) !usize {
             // Vector[C,N]
             else => return info.array.len,
         },
-        .@"struct" => return info.@"struct".fields.len,
+        .@"struct" => return info.@"struct".field_names.len,
         else => return error.NotSupported,
     }
 }
 
 pub const chunk = [BYTES_PER_CHUNK]u8;
-pub const zero_chunk: chunk = [_]u8{0} ** BYTES_PER_CHUNK;
+pub const zero_chunk: chunk = @splat(0);
 
 pub fn pack(T: type, values: T, l: *ArrayList(u8), allocator: Allocator) ![]chunk {
     try serialize(T, values, l, allocator);
@@ -776,7 +775,7 @@ test "pack string" {
     var expected: [128]u8 = undefined;
     var list: ArrayList(u8) = .empty;
     defer list.deinit(std.testing.allocator);
-    const out = try pack([]const u8, "a" ** 100, &list, std.testing.allocator);
+    const out = try pack([]const u8, &@as([100]u8, @splat('a')), &list, std.testing.allocator);
 
     _ = try std.fmt.hexToBytes(expected[0..], "6161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616100000000000000000000000000000000000000000000000000000000");
 
@@ -843,12 +842,12 @@ test "merkleize an empty slice" {
 test "merkleize a string" {
     var list: ArrayList(u8) = .empty;
     defer list.deinit(std.testing.allocator);
-    const chunks = try pack([]const u8, "a" ** 100, &list, std.testing.allocator);
+    const chunks = try pack([]const u8, &@as([100]u8, @splat('a')), &list, std.testing.allocator);
     var out: [32]u8 = undefined;
     try merkleize(Sha256, chunks, null, &out);
     // Build the expected tree
-    const leaf1 = [_]u8{0x61} ** 32; // "0xaaaaa....aa" 32 times
-    var leaf2: [32]u8 = [_]u8{0x61} ** 4 ++ [_]u8{0} ** 28;
+    const leaf1: [32]u8 = @splat(0x61); // "0xaaaaa....aa" 32 times
+    var leaf2: [32]u8 = @as([4]u8, @splat(0x61)) ++ @as([28]u8, @splat(0));
     var root: [32]u8 = undefined;
     var internal_left: [32]u8 = undefined;
     var internal_right: [32]u8 = undefined;
@@ -873,7 +872,7 @@ test "merkleize a boolean" {
     defer list.deinit(std.testing.allocator);
 
     var chunks = try pack(bool, false, &list, std.testing.allocator);
-    var expected = [_]u8{0} ** BYTES_PER_CHUNK;
+    var expected: [BYTES_PER_CHUNK]u8 = @splat(0);
     var out: [BYTES_PER_CHUNK]u8 = undefined;
     try merkleize(Sha256, chunks, null, &out);
 
@@ -891,8 +890,8 @@ test "merkleize a boolean" {
 test "merkleize a bytes16 vector with one element" {
     var list: ArrayList(u8) = .empty;
     defer list.deinit(std.testing.allocator);
-    _ = try pack([16]u8, [_]u8{0xaa} ** 16, &list, std.testing.allocator);
-    // var expected: [32]u8 = [_]u8{0xaa} ** 16 ++ [_]u8{0x00} ** 16;
+    _ = try pack([16]u8, @splat(0xaa), &list, std.testing.allocator);
+    // var expected: [32]u8 = @as([16]u8, @splat(0xaa)) ++ @as([16]u8, @splat(0x00));
     // var out: [32]u8 = undefined;
     // try merkleize(sha256, chunks, null, &out);
     // try std.testing.expect(std.mem.eql(u8, out[0..], expected[0..]));
@@ -998,8 +997,8 @@ pub fn hashTreeRoot(Hasher: type, T: type, value: T, out: *[Hasher.digest_length
             var chunks: ArrayList(chunk) = .empty;
             defer chunks.deinit(allocator);
             var tmp: chunk = undefined;
-            inline for (str.fields) |f| {
-                try hashTreeRoot(Hasher, f.type, @field(value, f.name), &tmp, allocator);
+            inline for (str.field_names, str.field_types) |field_name, field_type| {
+                try hashTreeRoot(Hasher, field_type, @field(value, field_name), &tmp, allocator);
                 try chunks.append(allocator, tmp);
             }
             try merkleize(Hasher, chunks.items, null, out);
@@ -1016,10 +1015,10 @@ pub fn hashTreeRoot(Hasher: type, T: type, value: T, out: *[Hasher.digest_length
             if (u.tag_type == null) {
                 return error.UnionIsNotTagged;
             }
-            inline for (u.fields, 0..) |f, index| {
-                if (@intFromEnum(value) == index) {
+            inline for (u.field_names, u.field_types, 0..) |field_name, field_type, index| {
+                if (@backingInt(value) == index) {
                     var tmp: chunk = undefined;
-                    try hashTreeRoot(Hasher, f.type, @field(value, f.name), &tmp, allocator);
+                    try hashTreeRoot(Hasher, field_type, @field(value, field_name), &tmp, allocator);
                     mixInSelector(Hasher, tmp, index, out);
                 }
             }

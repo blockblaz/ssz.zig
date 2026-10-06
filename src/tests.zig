@@ -1132,7 +1132,7 @@ test "maxInLength for fixed and variable types" {
     try expect(try ListU64.maxInLength() == 16 * 8);
 
     const Bitlist32 = utils.Bitlist(32);
-    try expect(Bitlist32.maxInLength() == (32 + 7 + 1) / 8);
+    try expect(try Bitlist32.maxInLength() == (32 + 7 + 1) / 8);
 
     const ListList = utils.List(utils.List(u8, 4), 2);
     try expect(try ListList.maxInLength() == 2 * 4 + 2 * (4 * 1));
@@ -2999,6 +2999,490 @@ test "utils.Bitlist.clone copies backing storage independently" {
     try expect(cloned.eql(&data));
     try cloned.set(0, false);
     try expect((try data.get(0)) == true);
+}
+
+// EIP-7916 ProgressiveList / ProgressiveBitlist. The expected roots below come
+// from an independent Python transcription of the EIP pseudocode, not from this
+// library.
+
+fn expectRootHex(expected_hex: []const u8, actual: *const [32]u8) !void {
+    var expected: [32]u8 = undefined;
+    _ = try std.fmt.hexToBytes(expected[0..], expected_hex);
+    try std.testing.expectEqualSlices(u8, expected[0..], actual[0..]);
+}
+
+fn expectBytesHex(expected_hex: []const u8, actual: []const u8) !void {
+    var buf: [256]u8 = undefined;
+    const expected = try std.fmt.hexToBytes(buf[0..], expected_hex);
+    try std.testing.expectEqualSlices(u8, expected, actual);
+}
+
+test "ProgressiveList(u64) tree root matches the EIP-7916 reference" {
+    const PList = utils.ProgressiveList(u64);
+    const cases = [_]struct { n: u64, root: []const u8 }{
+        // Empty merkleizes to the zero chunk, so the root is hash(zero, zero).
+        .{ .n = 0, .root = "f5a5fd42d16a20302798ef6ed309979b43003d2320d9f0e8ea9831a92759fb4b" },
+        .{ .n = 1, .root = "905efb51c2764c2c7a4efb0548e372569df06db82115c3b1896c186632f3fe5b" },
+        // 4 uint64 fill the 1-leaf subtree; the 5th spills into the 4-leaf one.
+        .{ .n = 4, .root = "95a2f252ed2659ccf75e8821f05757c4663fce68e89d0290abf5c33d772935ae" },
+        .{ .n = 5, .root = "29918e0447260511bc5be0f7dbb9817201e16e30c56af228b9cb931a16e8799d" },
+        // 5 chunks exactly fill the 1- and 4-leaf subtrees; 6 reaches the 16-leaf one.
+        .{ .n = 20, .root = "c8a62a1a5fc7f814fafecb1d510213b25bda25425ab31c1ad7ff63c62c78307d" },
+        .{ .n = 21, .root = "ed360c03ecbdfbb6f4b1cf5d9cbf6887038423e31121700797de968a9969aaed" },
+        .{ .n = 22, .root = "61f3eebb593ca31c113a9dfec164edea6d13272e20a5f8d0ab641c6e3e2222a9" },
+    };
+
+    for (cases) |c| {
+        var list = try PList.init(std.testing.allocator);
+        defer list.deinit();
+        var i: u64 = 1;
+        while (i <= c.n) : (i += 1) try list.append(i);
+
+        var root: [32]u8 = undefined;
+        try hashTreeRoot(Sha256, PList, list, &root, std.testing.allocator);
+        try expectRootHex(c.root, &root);
+    }
+}
+
+test "ProgressiveByteList tree root matches the EIP-7916 reference" {
+    const PBytes = utils.ProgressiveByteList;
+
+    // Every chunk pack() produces counts, so all-zero payloads still change
+    // root with each added chunk.
+    const zero_cases = [_]struct { n: usize, root: []const u8 }{
+        .{ .n = 0, .root = "f5a5fd42d16a20302798ef6ed309979b43003d2320d9f0e8ea9831a92759fb4b" },
+        .{ .n = 1, .root = "e832d263aaa8f9417d9f45a702834f6961ee7b15ad4d3d27f2b0f4fe79d33031" },
+        .{ .n = 32, .root = "e36306f41e65a19bc26226df4c969ef1ae6ac2e29edf4038761d553854385723" },
+        .{ .n = 33, .root = "c33f5d2d028d955914dc4b72eb30c84ebb64b68df169054c5424b86833a8b171" },
+        .{ .n = 100, .root = "c1757df1aa61464c2e0f033c88cb25aefde6c01a1cd41f2b421dffa178bce517" },
+        .{ .n = 160, .root = "182743acd50e5d3765ba7c19e48f8a5c899b46ea95441045d1abb296106baa6a" },
+        .{ .n = 161, .root = "f87031fc1210ed606d80f277dbbb765095d4b471720fe3371b8773fad46d02c0" },
+    };
+    for (zero_cases) |c| {
+        var list = try PBytes.init(std.testing.allocator);
+        defer list.deinit();
+        for (0..c.n) |_| try list.append(0);
+
+        var root: [32]u8 = undefined;
+        try hashTreeRoot(Sha256, PBytes, list, &root, std.testing.allocator);
+        try expectRootHex(c.root, &root);
+    }
+
+    const cases = [_]struct { n: usize, root: []const u8 }{
+        .{ .n = 1, .root = "905efb51c2764c2c7a4efb0548e372569df06db82115c3b1896c186632f3fe5b" },
+        .{ .n = 5, .root = "209ec0633411cff6970c26380d214e30985d43dcc50509c1b3b28f615d333939" },
+        .{ .n = 33, .root = "bdb0c331db145d1efad9e022c70ab1f1c0896e7fc8bd8a83c6f0cd6ca89e1009" },
+        .{ .n = 200, .root = "9152ead04c2a922ed04f51d7e2410c6f856f4ff670a99b86c880ae8cf92124a1" },
+    };
+    for (cases) |c| {
+        var list = try PBytes.init(std.testing.allocator);
+        defer list.deinit();
+        for (0..c.n) |i| try list.append(@truncate(i + 1));
+
+        var root: [32]u8 = undefined;
+        try hashTreeRoot(Sha256, PBytes, list, &root, std.testing.allocator);
+        try expectRootHex(c.root, &root);
+    }
+}
+
+test "ProgressiveList of composite items tree root matches the EIP-7916 reference" {
+    // Bytes32 elements hash to themselves, so the chunks are the raw values.
+    const PList = utils.ProgressiveList([32]u8);
+    const cases = [_]struct { n: usize, root: []const u8 }{
+        .{ .n = 1, .root = "a21da97c8a597221c87c9ea5ecdfbd860fcd52fd6fb5b001723f6437856c8df1" },
+        .{ .n = 2, .root = "9a4badc45a45e9dd4b131c2c1aaff8a054527d8db40d2a7cd07e8f0f02a8232b" },
+        .{ .n = 5, .root = "183886e81b2e887d5960b2fa49b3464eabee62ec55ff5e6ee6f7e0495d8a01d1" },
+        .{ .n = 21, .root = "93589633f10a1e8fe51bef0481731c7c19d7a87269127b6c6a19720668ee47da" },
+        .{ .n = 22, .root = "e79bdcda4e58dd09c4b855964e1f1c01c99e215b6e01602f5302763effaf8637" },
+    };
+
+    for (cases) |c| {
+        var list = try PList.init(std.testing.allocator);
+        defer list.deinit();
+        for (0..c.n) |i| try list.append(@as([32]u8, @splat(@truncate(i + 1))));
+
+        var root: [32]u8 = undefined;
+        try hashTreeRoot(Sha256, PList, list, &root, std.testing.allocator);
+        try expectRootHex(c.root, &root);
+    }
+}
+
+test "ProgressiveBitlist tree root matches the EIP-7916 reference" {
+    const PBits = utils.ProgressiveBitlist;
+
+    const set_cases = [_]struct { n: usize, root: []const u8 }{
+        .{ .n = 0, .root = "f5a5fd42d16a20302798ef6ed309979b43003d2320d9f0e8ea9831a92759fb4b" },
+        .{ .n = 1, .root = "905efb51c2764c2c7a4efb0548e372569df06db82115c3b1896c186632f3fe5b" },
+        .{ .n = 8, .root = "89b4e102035da473eaf22c286e07d433e11cbd721578e55111e6e3381e44a485" },
+        .{ .n = 256, .root = "b3327406854ffab96af59832dfa3f690f72c4f898e2ffd4ef3e90cc2fb876b43" },
+        .{ .n = 257, .root = "be707c375a49431fdb06c00f7a4dcc9200d5613ea02999dc5e081913171bb8d0" },
+        .{ .n = 300, .root = "8ab2de07a48c321a99ae0e54769d97d3b7f9d538c404ad6290db6ee40bcbd63d" },
+    };
+    for (set_cases) |c| {
+        var bits = try PBits.init(std.testing.allocator);
+        defer bits.deinit();
+        for (0..c.n) |_| try bits.append(true);
+
+        var root: [32]u8 = undefined;
+        try hashTreeRoot(Sha256, PBits, bits, &root, std.testing.allocator);
+        try expectRootHex(c.root, &root);
+    }
+
+    // Bitlist[N] trims trailing zero bytes before merkleizing; a progressive
+    // bitlist must not, since dropping a chunk changes the root.
+    const zero_cases = [_]struct { n: usize, root: []const u8 }{
+        .{ .n = 1, .root = "e832d263aaa8f9417d9f45a702834f6961ee7b15ad4d3d27f2b0f4fe79d33031" },
+        .{ .n = 8, .root = "8d709c6c23946fc63d47fefdf2466e87914380ddd1200753a093469535fdc776" },
+        .{ .n = 256, .root = "09756b4ed11db307f098b2c1c543ae5348eadd79bd0413dcb941e4fbfe43592c" },
+        .{ .n = 257, .root = "20833147423c1ffcdf357e57b00e48b2425dea1a96663333acbad1caeaa14653" },
+        .{ .n = 300, .root = "143b6995489128f2afce0fcbbaf35c530d15af97ee2f6d11d4365c0200bef5de" },
+    };
+    for (zero_cases) |c| {
+        var bits = try PBits.init(std.testing.allocator);
+        defer bits.deinit();
+        for (0..c.n) |_| try bits.append(false);
+
+        var root: [32]u8 = undefined;
+        try hashTreeRoot(Sha256, PBits, bits, &root, std.testing.allocator);
+        try expectRootHex(c.root, &root);
+    }
+
+    var alternating = try PBits.init(std.testing.allocator);
+    defer alternating.deinit();
+    for (0..13) |i| try alternating.append(i % 2 == 0);
+    var root: [32]u8 = undefined;
+    try hashTreeRoot(Sha256, PBits, alternating, &root, std.testing.allocator);
+    try expectRootHex("a231c639a6becb4e98a86764f81e94b4a4ab7f47c1ff2da0bcb0b474319ea07e", &root);
+}
+
+test "ProgressiveList is unbounded and merkleizes deep subtrees" {
+    // 5000 uint64 = 1250 chunks, reaching the sixth (1024-leaf) subtree.
+    const PList = utils.ProgressiveList(u64);
+    var list = try PList.init(std.testing.allocator);
+    defer list.deinit();
+    for (0..5000) |i| try list.append(@intCast(i % 256));
+
+    var root: [32]u8 = undefined;
+    try hashTreeRoot(Sha256, PList, list, &root, std.testing.allocator);
+    try expectRootHex("2ccd559b9db69d560a737ea1bd9a97a2d3557ef9eba116dd5a12c97d7079bd11", &root);
+
+    const PBits = utils.ProgressiveBitlist;
+    var bits = try PBits.init(std.testing.allocator);
+    defer bits.deinit();
+    for (0..20000) |i| try bits.append((i * 7) % 3 == 0);
+
+    try hashTreeRoot(Sha256, PBits, bits, &root, std.testing.allocator);
+    try expectRootHex("fc22c6f8885c3813f8b0254e21aea8678954339685aef5a1bf49651bbbc2bd81", &root);
+}
+
+test "ProgressiveList serialization is identical to List[N]" {
+    const PList = utils.ProgressiveList(u64);
+    const BList = utils.List(u64, 1024);
+
+    var progressive = try PList.init(std.testing.allocator);
+    defer progressive.deinit();
+    var bounded = try BList.init(std.testing.allocator);
+    defer bounded.deinit();
+    for (0..37) |i| {
+        try progressive.append(@intCast(i * 7 + 1));
+        try bounded.append(@intCast(i * 7 + 1));
+    }
+
+    var progressive_buf: ArrayList(u8) = .empty;
+    defer progressive_buf.deinit(std.testing.allocator);
+    var bounded_buf: ArrayList(u8) = .empty;
+    defer bounded_buf.deinit(std.testing.allocator);
+    try serialize(PList, progressive, &progressive_buf, std.testing.allocator);
+    try serialize(BList, bounded, &bounded_buf, std.testing.allocator);
+
+    try expect(std.mem.eql(u8, progressive_buf.items, bounded_buf.items));
+    try expect(try serializedSize(PList, progressive) == try serializedSize(BList, bounded));
+    // The merkleization, on the other hand, must differ.
+    var progressive_root: [32]u8 = undefined;
+    var bounded_root: [32]u8 = undefined;
+    try hashTreeRoot(Sha256, PList, progressive, &progressive_root, std.testing.allocator);
+    try hashTreeRoot(Sha256, BList, bounded, &bounded_root, std.testing.allocator);
+    try expect(!std.mem.eql(u8, &progressive_root, &bounded_root));
+}
+
+test "ProgressiveBitlist serialization is identical to Bitlist[N]" {
+    const PBits = utils.ProgressiveBitlist;
+    const BBits = utils.Bitlist(1024);
+
+    inline for (.{ 0, 1, 7, 8, 9, 300 }) |n| {
+        var progressive = try PBits.init(std.testing.allocator);
+        defer progressive.deinit();
+        var bounded = try BBits.init(std.testing.allocator);
+        defer bounded.deinit();
+        for (0..n) |i| {
+            try progressive.append(i % 3 == 0);
+            try bounded.append(i % 3 == 0);
+        }
+
+        var progressive_buf: ArrayList(u8) = .empty;
+        defer progressive_buf.deinit(std.testing.allocator);
+        var bounded_buf: ArrayList(u8) = .empty;
+        defer bounded_buf.deinit(std.testing.allocator);
+        try serialize(PBits, progressive, &progressive_buf, std.testing.allocator);
+        try serialize(BBits, bounded, &bounded_buf, std.testing.allocator);
+
+        try expect(std.mem.eql(u8, progressive_buf.items, bounded_buf.items));
+        try expect(progressive.serializedSize() == bounded.serializedSize());
+    }
+}
+
+test "(de)serialize ProgressiveList of fixed-length objects" {
+    const PList = utils.ProgressiveList(u64);
+    var list = try PList.init(std.testing.allocator);
+    defer list.deinit();
+    for (0..3000) |i| try list.append(i * 100);
+
+    var buf: ArrayList(u8) = .empty;
+    defer buf.deinit(std.testing.allocator);
+    try serialize(PList, list, &buf, std.testing.allocator);
+
+    var deser = try PList.init(std.testing.allocator);
+    defer deser.deinit();
+    try deserialize(PList, buf.items, &deser, std.testing.allocator);
+    try expect(list.eql(&deser));
+}
+
+test "(de)serialize ProgressiveList of variable-length objects" {
+    const PList = utils.ProgressiveList([]const u8);
+    var list = try PList.init(std.testing.allocator);
+    defer list.deinit();
+    for (0..10) |i| {
+        try list.append(try std.fmt.allocPrint(std.testing.allocator, "count={}", .{i}));
+    }
+    defer for (0..list.len()) |i| {
+        std.testing.allocator.free(list.get(i) catch unreachable);
+    };
+
+    var buf: ArrayList(u8) = .empty;
+    defer buf.deinit(std.testing.allocator);
+    try serialize(PList, list, &buf, std.testing.allocator);
+
+    var deser = try PList.init(std.testing.allocator);
+    defer deser.deinit();
+    try deserialize(PList, buf.items, &deser, std.testing.allocator);
+    try expect(list.len() == deser.len());
+    for (0..list.len()) |i| {
+        try expect(std.mem.eql(u8, try list.get(i), try deser.get(i)));
+    }
+}
+
+test "(de)serialize ProgressiveBitlist" {
+    const PBits = utils.ProgressiveBitlist;
+    inline for (.{ 0, 1, 8, 300, 4097 }) |n| {
+        var bits = try PBits.init(std.testing.allocator);
+        defer bits.deinit();
+        for (0..n) |i| try bits.append(i % 5 == 0);
+
+        var buf: ArrayList(u8) = .empty;
+        defer buf.deinit(std.testing.allocator);
+        try serialize(PBits, bits, &buf, std.testing.allocator);
+
+        var deser: PBits = undefined;
+        try deserialize(PBits, buf.items, &deser, std.testing.allocator);
+        defer deser.deinit();
+        try expect(deser.len() == n);
+        try expect(bits.eql(&deser));
+    }
+}
+
+test "ProgressiveList as a struct field" {
+    const Block = struct {
+        slot: u64,
+        transactions: utils.ProgressiveList(u64),
+        flags: utils.ProgressiveBitlist,
+    };
+
+    var block = Block{
+        .slot = 42,
+        .transactions = try utils.ProgressiveList(u64).init(std.testing.allocator),
+        .flags = try utils.ProgressiveBitlist.init(std.testing.allocator),
+    };
+    defer block.transactions.deinit();
+    defer block.flags.deinit();
+    for (0..40) |i| try block.transactions.append(@intCast(i));
+    for (0..40) |i| try block.flags.append(i % 2 == 0);
+
+    try expect(!try isFixedSizeObject(Block));
+
+    var buf: ArrayList(u8) = .empty;
+    defer buf.deinit(std.testing.allocator);
+    try serialize(Block, block, &buf, std.testing.allocator);
+
+    var deser: Block = undefined;
+    try deserialize(Block, buf.items, &deser, std.testing.allocator);
+    defer deser.transactions.deinit();
+    defer deser.flags.deinit();
+
+    try expect(deser.slot == 42);
+    try expect(block.transactions.eql(&deser.transactions));
+    try expect(block.flags.eql(&deser.flags));
+
+    var root: [32]u8 = undefined;
+    var deser_root: [32]u8 = undefined;
+    try hashTreeRoot(Sha256, Block, block, &root, std.testing.allocator);
+    try hashTreeRoot(Sha256, Block, deser, &deser_root, std.testing.allocator);
+    try expect(std.mem.eql(u8, &root, &deser_root));
+}
+
+test "progressive types have no static maxInLength" {
+    const PList = utils.ProgressiveList(u64);
+    const PBits = utils.ProgressiveBitlist;
+
+    try expectError(error.NoMaxInLengthAvailable, libssz.maxInLength(PList));
+    try expectError(error.NoMaxInLengthAvailable, libssz.maxInLength(PBits));
+    try expect(try libssz.minInLength(PList) == 0);
+    try expect(try libssz.minInLength(PBits) == 1);
+
+    // The error must propagate through a containing struct rather than
+    // silently yielding a bogus bound.
+    const S = struct { a: u32, b: PList };
+    try expectError(error.NoMaxInLengthAvailable, libssz.maxInLength(S));
+}
+
+test "ProgressiveBitlist rejects malformed encodings but not long ones" {
+    const PBits = utils.ProgressiveBitlist;
+
+    // The sentinel bit is still mandatory, a zero trailing byte still invalid.
+    try expectError(error.InvalidBitlistEncoding, PBits.validateBitlist(&[_]u8{}));
+    try expectError(error.BitlistTrailingByteZero, PBits.validateBitlist(&[_]u8{ 0xff, 0x00 }));
+
+    // A payload that Bitlist(16) rejects on length grounds is fine here.
+    const long: [64]u8 = @splat(0xff);
+    try expectError(error.BitlistTooManyBytes, utils.Bitlist(16).validateBitlist(&long));
+    try PBits.validateBitlist(&long);
+}
+
+// EIP-7495/7688 ProgressiveContainer. Expected roots come from eth-remerkleable,
+// the reference implementation used by execution-specs.
+
+test "ProgressiveContainer tree root matches the reference" {
+    const PC3 = struct {
+        pub const ssz_progressive_container = true;
+        a: u64,
+        b: [32]u8,
+        c: utils.ProgressiveByteList,
+    };
+
+    var c = try utils.ProgressiveByteList.init(std.testing.allocator);
+    defer c.deinit();
+    for (0..40) |_| try c.append(0xaa);
+    const value = PC3{ .a = 7, .b = @splat(0x11), .c = c };
+
+    var root: [32]u8 = undefined;
+    try hashTreeRoot(Sha256, PC3, value, &root, std.testing.allocator);
+    try expectRootHex("bfbf57e1e4548f1f776af7e2d996c4110e8e87d7d1e438c1c7bc3206b108f9ad", &root);
+
+    // The same fields without the marker merkleize as a plain Container.
+    const Plain = struct { a: u64, b: [32]u8, c: utils.ProgressiveByteList };
+    var plain_root: [32]u8 = undefined;
+    try hashTreeRoot(Sha256, Plain, Plain{ .a = 7, .b = @splat(0x11), .c = c }, &plain_root, std.testing.allocator);
+    try expectRootHex("2c1e19ea8cbe5da65b867b2c62f8a9be4f1f38f046b15a48a7c96bbc0c59de91", &plain_root);
+
+    // Serialization is unaffected by the marker.
+    var pc_buf: ArrayList(u8) = .empty;
+    defer pc_buf.deinit(std.testing.allocator);
+    var plain_buf: ArrayList(u8) = .empty;
+    defer plain_buf.deinit(std.testing.allocator);
+    try serialize(PC3, value, &pc_buf, std.testing.allocator);
+    try serialize(Plain, Plain{ .a = 7, .b = @splat(0x11), .c = c }, &plain_buf, std.testing.allocator);
+    try expect(std.mem.eql(u8, pc_buf.items, plain_buf.items));
+
+    try expectBytesHex("070000000000000011111111111111111111111111111111111111111111111111111111111111112c000000" ++ @as([80]u8, @splat('a')), pc_buf.items);
+}
+
+test "ProgressiveContainer with one and nineteen fields" {
+    const PC1 = struct {
+        pub const ssz_progressive_container = true;
+        a: u64,
+    };
+    var root: [32]u8 = undefined;
+    try hashTreeRoot(Sha256, PC1, PC1{ .a = 1 }, &root, std.testing.allocator);
+    try expectRootHex("905efb51c2764c2c7a4efb0548e372569df06db82115c3b1896c186632f3fe5b", &root);
+
+    // 19 fields is the ExecutionPayload shape: active_fields packs to
+    // ff ff 07 followed by zeroes.
+    const PC19 = struct {
+        pub const ssz_progressive_container = true;
+        f0: u64,
+        f1: u64,
+        f2: u64,
+        f3: u64,
+        f4: u64,
+        f5: u64,
+        f6: u64,
+        f7: u64,
+        f8: u64,
+        f9: u64,
+        f10: u64,
+        f11: u64,
+        f12: u64,
+        f13: u64,
+        f14: u64,
+        f15: u64,
+        f16: u64,
+        f17: u64,
+        f18: u64,
+    };
+    var v19: PC19 = undefined;
+    inline for (@typeInfo(PC19).@"struct".field_names, 0..) |name, i| {
+        @field(v19, name) = i + 1;
+    }
+    try hashTreeRoot(Sha256, PC19, v19, &root, std.testing.allocator);
+    try expectRootHex("c6de7b2d3af2d92e3136b2228b93460506fab2907e467eff356c1dae7944d47b", &root);
+}
+
+test "ProgressiveContainer of ProgressiveLists matches the reference" {
+    // The ExecutionRequests shape: 5 active fields, each a ProgressiveList of
+    // a fixed-size container.
+    const Req = struct { x: u64 };
+    const ReqList = utils.ProgressiveList(Req);
+    const PC5 = struct {
+        pub const ssz_progressive_container = true;
+        deposits: ReqList,
+        withdrawals: ReqList,
+        consolidations: ReqList,
+        builder_deposits: ReqList,
+        builder_exits: ReqList,
+    };
+
+    var lists: [5]ReqList = undefined;
+    for (0..5) |i| lists[i] = try ReqList.init(std.testing.allocator);
+    defer for (0..5) |i| lists[i].deinit();
+    try lists[0].append(.{ .x = 1 });
+    try lists[0].append(.{ .x = 2 });
+    try lists[2].append(.{ .x = 3 });
+    try lists[4].append(.{ .x = 4 });
+    try lists[4].append(.{ .x = 5 });
+    try lists[4].append(.{ .x = 6 });
+
+    const value = PC5{
+        .deposits = lists[0],
+        .withdrawals = lists[1],
+        .consolidations = lists[2],
+        .builder_deposits = lists[3],
+        .builder_exits = lists[4],
+    };
+
+    var root: [32]u8 = undefined;
+    try hashTreeRoot(Sha256, PC5, value, &root, std.testing.allocator);
+    try expectRootHex("998b7a575ff838ca9816b0b12bd6883a779e98a0036745f4cb645fe72baa5776", &root);
+
+    var buf: ArrayList(u8) = .empty;
+    defer buf.deinit(std.testing.allocator);
+    try serialize(PC5, value, &buf, std.testing.allocator);
+    try expectBytesHex("1400000024000000240000002c0000002c000000010000000000000002000000000000000300000000000000040000000000000005000000000000000600000000000000", buf.items);
+
+    var deser: PC5 = undefined;
+    try deserialize(PC5, buf.items, &deser, std.testing.allocator);
+    defer inline for (@typeInfo(PC5).@"struct".field_names) |name| @field(deser, name).deinit();
+    var deser_root: [32]u8 = undefined;
+    try hashTreeRoot(Sha256, PC5, deser, &deser_root, std.testing.allocator);
+    try expect(std.mem.eql(u8, &root, &deser_root));
 }
 
 test {

@@ -698,6 +698,30 @@ test "mixInLength" {
     try std.testing.expect(std.mem.eql(u8, mixin[0..], expected[0..]));
 }
 
+fn mixInActiveFields(Hasher: type, root: [Hasher.digest_length]u8, active_fields: chunk, out: *[Hasher.digest_length]u8) void {
+    var hasher = Hasher.init(Hasher.Options{});
+    hasher.update(root[0..]);
+    hasher.update(active_fields[0..]);
+    hasher.final(out[0..]);
+}
+
+/// A struct opts in to EIP-7495 `ProgressiveContainer(active_fields=[1] * N)`
+/// merkleization, as mandated by EIP-7688, by declaring
+/// `pub const ssz_progressive_container = true;`. Serialization is unchanged.
+pub fn isProgressiveContainer(T: type) bool {
+    return @hasDecl(T, "ssz_progressive_container") and T.ssz_progressive_container;
+}
+
+/// pack_bits(active_fields) for `n` all-active fields. EIP-7495 caps
+/// active_fields at 256 bits, so the result is always a single chunk.
+fn activeFieldsChunk(comptime n: usize) chunk {
+    if (n == 0) @compileError("a progressive container needs at least one field");
+    if (n > 256) @compileError("a progressive container may have at most 256 fields");
+    var c: chunk = zero_chunk;
+    for (0..n) |i| c[i / 8] |= @as(u8, 1) << @truncate(i % 8);
+    return c;
+}
+
 fn mixInSelector(Hasher: type, root: [Hasher.digest_length]u8, comptime selector: usize, out: *[Hasher.digest_length]u8) void {
     var hasher = Hasher.init(Hasher.Options{});
     hasher.update(root[0..]);
@@ -897,6 +921,79 @@ test "merkleize a bytes16 vector with one element" {
     // try std.testing.expect(std.mem.eql(u8, out[0..], expected[0..]));
 }
 
+// merkleizeProgressive recursively calculates the root hash of an EIP-7916
+// progressive Merkle tree: a 0-terminated sequence of binary subtrees with leaf
+// counts 1, 4, 16, 64, ... Callers start the recursion with `num_leaves = 1`.
+//
+// Trailing zero chunks are not padding here, so `chunks` must hold exactly
+// ceil(serialized_len / BYTES_PER_CHUNK) entries.
+pub fn merkleizeProgressive(Hasher: type, chunks: []chunk, num_leaves: usize, out: *[Hasher.digest_length]u8) anyerror!void {
+    // The 0-terminator.
+    if (chunks.len == 0) {
+        @memset(out[0..], 0);
+        return;
+    }
+
+    // `merkleize` zero-pads the left subtree up to `num_leaves`.
+    const split = @min(num_leaves, chunks.len);
+    var buf: [Hasher.digest_length]u8 = undefined;
+    var digest = Hasher.init(Hasher.Options{});
+
+    try merkleize(Hasher, chunks[0..split], num_leaves, &buf);
+    digest.update(buf[0..]);
+    try merkleizeProgressive(Hasher, chunks[split..], num_leaves * 4, &buf);
+    digest.update(buf[0..]);
+
+    digest.final(out);
+}
+
+test "merkleizeProgressive of an empty slice is the zero chunk" {
+    const chunks = &[0][32]u8{};
+    var out: [32]u8 = undefined;
+    try merkleizeProgressive(Sha256, chunks, 1, &out);
+    try std.testing.expectEqualSlices(u8, zero_chunk[0..], out[0..]);
+}
+
+test "merkleizeProgressive subtree layout" {
+    var chunks: [5]chunk = undefined;
+    for (0..5) |i| chunks[i] = @splat(@intCast(i + 1));
+
+    var got: [32]u8 = undefined;
+    var expected: [32]u8 = undefined;
+    var hasher = Sha256.init(Sha256.Options{});
+
+    // A single chunk fills the 1-leaf subtree, terminated by the zero chunk.
+    try merkleizeProgressive(Sha256, chunks[0..1], 1, &got);
+    hasher.update(chunks[0][0..]);
+    hasher.update(zero_chunk[0..]);
+    hasher.final(&expected);
+    try std.testing.expectEqualSlices(u8, expected[0..], got[0..]);
+
+    // Five chunks fill the 1-leaf and the 4-leaf subtrees exactly.
+    try merkleizeProgressive(Sha256, chunks[0..5], 1, &got);
+    var second: [32]u8 = undefined;
+    try merkleize(Sha256, chunks[1..5], 4, &second);
+    var right: [32]u8 = undefined;
+    hasher = Sha256.init(Sha256.Options{});
+    hasher.update(second[0..]);
+    hasher.update(zero_chunk[0..]);
+    hasher.final(&right);
+    hasher = Sha256.init(Sha256.Options{});
+    hasher.update(chunks[0][0..]);
+    hasher.update(right[0..]);
+    hasher.final(&expected);
+    try std.testing.expectEqualSlices(u8, expected[0..], got[0..]);
+}
+
+test "merkleizeProgressive is sensitive to trailing zero chunks" {
+    var chunks = [_]chunk{ @splat(0xAA), zero_chunk };
+    var one: [32]u8 = undefined;
+    var two: [32]u8 = undefined;
+    try merkleizeProgressive(Sha256, chunks[0..1], 1, &one);
+    try merkleizeProgressive(Sha256, chunks[0..2], 1, &two);
+    try std.testing.expect(!std.mem.eql(u8, one[0..], two[0..]));
+}
+
 fn packBits(bits: []const bool, l: *ArrayList(u8), allocator: Allocator) ![]chunk {
     var byte: u8 = 0;
     for (bits, 0..) |bit, bitidx| {
@@ -1001,7 +1098,12 @@ pub fn hashTreeRoot(Hasher: type, T: type, value: T, out: *[Hasher.digest_length
                 try hashTreeRoot(Hasher, field_type, @field(value, field_name), &tmp, allocator);
                 try chunks.append(allocator, tmp);
             }
-            try merkleize(Hasher, chunks.items, null, out);
+            if (comptime isProgressiveContainer(T)) {
+                try merkleizeProgressive(Hasher, chunks.items, 1, &tmp);
+                mixInActiveFields(Hasher, tmp, comptime activeFieldsChunk(str.field_names.len), out);
+            } else {
+                try merkleize(Hasher, chunks.items, null, out);
+            }
         },
         // An optional is a union with `None` as first value.
         .optional => |opt| if (value != null) {

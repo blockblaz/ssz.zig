@@ -15,9 +15,28 @@ const zero_chunk = lib.zero_chunk;
 
 /// Implements the SSZ `List[N]` container.
 pub fn List(T: type, comptime N: usize) type {
+    return ListImpl(T, N);
+}
+
+/// Implements the EIP-7916 `ProgressiveList[T]` container: serialized like
+/// `List[T, N]`, merkleized progressively, with no capacity limit.
+pub fn ProgressiveList(T: type) type {
+    return ListImpl(T, null);
+}
+
+/// EIP-7916 `ProgressiveByteList`.
+pub const ProgressiveByteList = ProgressiveList(u8);
+
+/// Backing implementation of `List` and `ProgressiveList`. `limit` is the
+/// maximum element count, or `null` for a progressive list.
+fn ListImpl(T: type, comptime limit: ?usize) type {
     // Compile-time check: List[bool, N] is not allowed, use Bitlist[N] instead
     if (T == bool) {
-        @compileError("List[bool, N] is not supported. Use Bitlist(" ++ std.fmt.comptimePrint("{}", .{N}) ++ ") instead for boolean lists.");
+        if (limit) |n| {
+            @compileError("List[bool, N] is not supported. Use Bitlist(" ++ std.fmt.comptimePrint("{}", .{n}) ++ ") instead for boolean lists.");
+        } else {
+            @compileError("ProgressiveList(bool) is not supported. Use ProgressiveBitlist instead for boolean lists.");
+        }
     }
 
     // Compile-time check: integer items must be a supported SSZ width.
@@ -55,11 +74,13 @@ pub fn List(T: type, comptime N: usize) type {
         }
 
         /// Maximum serialized byte length for List(T, N) with at most N elements.
+        /// A `ProgressiveList` is unbounded, so it has no static maximum.
         pub fn maxInLength() !usize {
+            const n = limit orelse return error.NoMaxInLengthAvailable;
             if (try lib.isFixedSizeObject(Item)) {
-                return N * try lib.serializedFixedSize(Item);
+                return n * try lib.serializedFixedSize(Item);
             }
-            return N * @sizeOf(u32) + N * try lib.maxInLength(Item);
+            return n * @sizeOf(u32) + n * try lib.maxInLength(Item);
         }
 
         /// Minimum serialized byte length for List(T, N) (empty list).
@@ -74,7 +95,7 @@ pub fn List(T: type, comptime N: usize) type {
 
             if (comptime Self.Item == u8) {
                 // bulk-copy fast path: bytes are their own SSZ encoding
-                if (serialized.len > N) return error.OffsetExceedsSize;
+                if (limit) |n| if (serialized.len > n) return error.OffsetExceedsSize;
                 try out.inner.ensureTotalCapacityPrecise(alloc, serialized.len);
                 out.inner.appendSliceAssumeCapacity(serialized);
                 return;
@@ -96,7 +117,7 @@ pub fn List(T: type, comptime N: usize) type {
                 const pitch = try lib.serializedFixedSize(Self.Item);
                 if (serialized.len % pitch != 0) return error.OffsetOrdering;
                 const n_items = serialized.len / pitch;
-                if (n_items > N) return error.OffsetExceedsSize;
+                if (limit) |n| if (n_items > n) return error.OffsetExceedsSize;
 
                 for (0..n_items) |i| {
                     var item: Self.Item = undefined;
@@ -152,7 +173,7 @@ pub fn List(T: type, comptime N: usize) type {
         }
 
         pub fn append(self: *Self, item: Self.Item) error{ Overflow, OutOfMemory }!void {
-            if (self.inner.items.len >= N) return error.Overflow;
+            if (limit) |n| if (self.inner.items.len >= n) return error.Overflow;
             try self.inner.append(self.allocator, item);
         }
 
@@ -165,7 +186,7 @@ pub fn List(T: type, comptime N: usize) type {
         }
 
         pub fn fromSlice(allocator: Allocator, m: []const T) !Self {
-            if (m.len > N) return error.Overflow;
+            if (limit) |n| if (m.len > n) return error.Overflow;
             var inner: Inner = .empty;
             try inner.appendSlice(allocator, m);
             return .{ .inner = inner, .allocator = allocator };
@@ -193,30 +214,39 @@ pub fn List(T: type, comptime N: usize) type {
         pub fn hashTreeRoot(self: *const Self, Hasher: type, out: *[Hasher.digest_length]u8, allocator: Allocator) !void {
             const items = self.constSlice();
 
+            var tmp: chunk = undefined;
+
             switch (@typeInfo(Item)) {
                 .int => {
                     var list: ArrayList(u8) = .empty;
                     defer list.deinit(allocator);
                     const chunks = try lib.pack([]const Item, items, &list, allocator);
 
-                    var tmp: chunk = undefined;
-                    try lib.merkleize(Hasher, chunks, chunkCountLimit(), &tmp);
-                    lib.mixInLength2(Hasher, tmp, items.len, out);
+                    if (limit == null) {
+                        try lib.merkleizeProgressive(Hasher, chunks, 1, &tmp);
+                    } else {
+                        try lib.merkleize(Hasher, chunks, chunkCountLimit(), &tmp);
+                    }
                 },
                 else => {
                     var chunks: ArrayList(chunk) = .empty;
                     defer chunks.deinit(allocator);
-                    var tmp: chunk = undefined;
+                    var leaf: chunk = undefined;
                     for (items) |item| {
-                        try lib.hashTreeRoot(Hasher, Item, item, &tmp, allocator);
-                        try chunks.append(allocator, tmp);
+                        try lib.hashTreeRoot(Hasher, Item, item, &leaf, allocator);
+                        try chunks.append(allocator, leaf);
                     }
-                    // Always use N (max capacity) for merkleization, even when empty,
-                    // This ensures proper tree depth according to SSZ specification
-                    try lib.merkleize(Hasher, chunks.items, N, &tmp);
-                    lib.mixInLength2(Hasher, tmp, items.len, out);
+                    if (limit) |n| {
+                        // Always use N (max capacity) for merkleization, even when empty,
+                        // This ensures proper tree depth according to SSZ specification
+                        try lib.merkleize(Hasher, chunks.items, n, &tmp);
+                    } else {
+                        try lib.merkleizeProgressive(Hasher, chunks.items, 1, &tmp);
+                    }
                 },
             }
+
+            lib.mixInLength2(Hasher, tmp, items.len, out);
         }
 
         // Leaf protocol consumed by TreeHasher (cached hashing)
@@ -232,9 +262,11 @@ pub fn List(T: type, comptime N: usize) type {
 
         /// SSZ chunk-count limit (used to derive the merkleization depth).
         pub fn chunkCountLimit() usize {
+            if (limit == null) @compileError("ProgressiveList has no fixed chunk-count limit; TreeHasher(ProgressiveList(T), Hasher) is not supported");
+            const n = limit.?;
             return switch (@typeInfo(Item)) {
-                .int => (N * @sizeOf(Item) + BYTES_PER_CHUNK - 1) / BYTES_PER_CHUNK,
-                else => N,
+                .int => (n * @sizeOf(Item) + BYTES_PER_CHUNK - 1) / BYTES_PER_CHUNK,
+                else => n,
             };
         }
 
@@ -273,8 +305,10 @@ pub fn List(T: type, comptime N: usize) type {
             }
 
             const length = offset / OFFSET_SIZE;
-            if (length > N) {
-                return error.DynamicLengthExceedsMax;
+            if (limit) |n| {
+                if (length > n) {
+                    return error.DynamicLengthExceedsMax;
+                }
             }
 
             return length;
@@ -284,6 +318,16 @@ pub fn List(T: type, comptime N: usize) type {
 
 /// Implements the SSZ `Bitlist[N]` container.
 pub fn Bitlist(comptime N: usize) type {
+    return BitlistImpl(N);
+}
+
+/// Implements the EIP-7916 `ProgressiveBitlist` container: serialized like
+/// `Bitlist[N]`, merkleized progressively, with no capacity limit.
+pub const ProgressiveBitlist = BitlistImpl(null);
+
+/// Backing implementation of `Bitlist` and `ProgressiveBitlist`. `limit` is the
+/// maximum bit count, or `null` for a progressive bitlist.
+fn BitlistImpl(comptime limit: ?usize) type {
     return struct {
         const Self = @This();
         pub const Item = bool;
@@ -367,8 +411,10 @@ pub fn Bitlist(comptime N: usize) type {
         }
 
         /// Maximum serialized byte length for Bitlist(N) (N bits + sentinel).
-        pub fn maxInLength() usize {
-            return (N + 7 + 1) / 8;
+        /// A `ProgressiveBitlist` is unbounded, so it has no static maximum.
+        pub fn maxInLength() !usize {
+            const n = limit orelse return error.NoMaxInLengthAvailable;
+            return (n + 7 + 1) / 8;
         }
 
         /// Minimum serialized byte length for Bitlist(N) (empty bitlist: one byte with sentinel).
@@ -393,7 +439,7 @@ pub fn Bitlist(comptime N: usize) type {
         }
 
         pub fn append(self: *Self, item: bool) error{ Overflow, OutOfMemory, IndexOutOfBounds }!void {
-            if (self.length >= N) return error.Overflow;
+            if (limit) |n| if (self.length >= n) return error.Overflow;
             if (self.length % 8 == 0) {
                 try self.inner.append(self.allocator, 0);
             }
@@ -429,10 +475,14 @@ pub fn Bitlist(comptime N: usize) type {
                 const sl = self.inner.items;
                 try bitfield_bytes.appendSlice(allocator, sl[0..sl.len]);
 
-                // Remove trailing zeros but keep at least one byte
-                // This avoids the wasteful pattern of removing all zeros and then adding back a chunk
-                while (bitfield_bytes.items.len > 1 and bitfield_bytes.items[bitfield_bytes.items.len - 1] == 0) {
-                    _ = bitfield_bytes.pop();
+                // Only safe for a fixed-depth tree: dropping a zero chunk would
+                // shift the progressive subtree layout.
+                if (limit != null) {
+                    // Remove trailing zeros but keep at least one byte
+                    // This avoids the wasteful pattern of removing all zeros and then adding back a chunk
+                    while (bitfield_bytes.items.len > 1 and bitfield_bytes.items[bitfield_bytes.items.len - 1] == 0) {
+                        _ = bitfield_bytes.pop();
+                    }
                 }
             }
 
@@ -443,7 +493,11 @@ pub fn Bitlist(comptime N: usize) type {
             const chunks = std.mem.bytesAsSlice(chunk, bitfield_bytes.items);
             var tmp: chunk = undefined;
 
-            try lib.merkleize(Hasher, chunks, chunkCountLimit(), &tmp);
+            if (limit == null) {
+                try lib.merkleizeProgressive(Hasher, chunks, 1, &tmp);
+            } else {
+                try lib.merkleize(Hasher, chunks, chunkCountLimit(), &tmp);
+            }
             lib.mixInLength2(Hasher, tmp, bit_length, out);
         }
 
@@ -455,7 +509,8 @@ pub fn Bitlist(comptime N: usize) type {
         }
 
         pub fn chunkCountLimit() usize {
-            return (N + 255) / 256;
+            if (limit == null) @compileError("ProgressiveBitlist has no fixed chunk-count limit; TreeHasher(ProgressiveBitlist, Hasher) is not supported");
+            return (limit.? + 255) / 256;
         }
 
         pub fn getLeafBytes(self: *const Self, idx: usize, out: *chunk, comptime Hasher: type, allocator: Allocator) !void {
@@ -478,9 +533,11 @@ pub fn Bitlist(comptime N: usize) type {
             if (byte_len == 0) return error.InvalidBitlistEncoding;
 
             // Maximum possible bytes in a bitlist with provided bitlimit.
-            const max_bytes = ((N + 7 + 1) >> 3);
-            if (byte_len > max_bytes) {
-                return error.BitlistTooManyBytes;
+            if (limit) |n| {
+                const max_bytes = ((n + 7 + 1) >> 3);
+                if (byte_len > max_bytes) {
+                    return error.BitlistTooManyBytes;
+                }
             }
 
             // The most significant bit is present in the last byte in the array.
@@ -498,8 +555,10 @@ pub fn Bitlist(comptime N: usize) type {
             // bit. Subtract this value by 1 to determine the length of the bitlist.
             const num_of_bits: u64 = @intCast(8 * (byte_len - 1) + msb_pos - 1);
 
-            if (num_of_bits > N) {
-                return error.BitlistTooManyBits;
+            if (limit) |n| {
+                if (num_of_bits > n) {
+                    return error.BitlistTooManyBits;
+                }
             }
         }
     };

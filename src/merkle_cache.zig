@@ -205,7 +205,7 @@ test "MerkleCache.recompute matches merkleize over its capacity" {
     defer cache.deinit(std.testing.allocator);
 
     var chunks: [3]chunk = undefined;
-    for (0..3) |i| chunks[i] = [_]u8{@intCast(i + 1)} ** 32;
+    for (0..3) |i| chunks[i] = @splat(@intCast(i + 1));
     try cache.ensureCapacity(std.testing.allocator, 3); // capacity -> 4
     fillLeaves(Sha256, &cache, &chunks);
     const root = cache.recompute();
@@ -222,7 +222,7 @@ test "MerkleCache.recomputeWithLength matches merkleize + mixInLength (limit 8)"
     defer cache.deinit(std.testing.allocator);
 
     var chunks: [3]chunk = undefined;
-    for (0..3) |i| chunks[i] = [_]u8{@intCast(i + 10)} ** 32;
+    for (0..3) |i| chunks[i] = @splat(@intCast(i + 10));
     try cache.ensureCapacity(std.testing.allocator, 3);
     fillLeaves(Sha256, &cache, &chunks);
 
@@ -260,12 +260,12 @@ test "MerkleCache incremental update matches full rebuild" {
     defer cache.deinit(std.testing.allocator);
 
     var chunks: [4]chunk = undefined;
-    for (0..4) |i| chunks[i] = [_]u8{@intCast(i + 1)} ** 32;
+    for (0..4) |i| chunks[i] = @splat(@intCast(i + 1));
     try cache.ensureCapacity(std.testing.allocator, 4);
     fillLeaves(Sha256, &cache, &chunks);
     _ = cache.recompute();
 
-    chunks[2] = [_]u8{0xFF} ** 32;
+    chunks[2] = @splat(0xFF);
     cache.leafPtr(2).* = chunks[2];
     cache.markDirty(2);
     const incremental = cache.recompute();
@@ -281,8 +281,8 @@ test "MerkleCache grow transplants and reuses the old subtree" {
     var cache = Cache.init();
     defer cache.deinit(std.testing.allocator);
 
-    const a: chunk = [_]u8{0xA1} ** 32;
-    const b: chunk = [_]u8{0xB2} ** 32;
+    const a: chunk = @splat(0xA1);
+    const b: chunk = @splat(0xB2);
     try cache.ensureCapacity(std.testing.allocator, 2);
     cache.leafPtr(0).* = a;
     cache.markDirty(0);
@@ -297,7 +297,7 @@ test "MerkleCache grow transplants and reuses the old subtree" {
     try std.testing.expectEqualSlices(u8, &a, cache.leafPtr(0));
     try std.testing.expectEqualSlices(u8, &b, cache.leafPtr(1));
 
-    const c: chunk = [_]u8{0xC3} ** 32;
+    const c: chunk = @splat(0xC3);
     cache.leafPtr(2).* = c;
     cache.markDirty(2);
     const root = cache.recompute();
@@ -314,8 +314,8 @@ test "MerkleCache multi-level grow reuses interior nodes (k>=2)" {
     var cache = Cache.init();
     defer cache.deinit(std.testing.allocator);
 
-    const a: chunk = [_]u8{0xA1} ** 32;
-    const b: chunk = [_]u8{0xB2} ** 32;
+    const a: chunk = @splat(0xA1);
+    const b: chunk = @splat(0xB2);
     try cache.ensureCapacity(std.testing.allocator, 2);
     cache.leafPtr(0).* = a;
     cache.markDirty(0);
@@ -335,9 +335,9 @@ test "MerkleCache multi-level grow reuses interior nodes (k>=2)" {
     try std.testing.expectEqualSlices(u8, &old_root, &cache.nodes[3]);
 
     // Add new data c,d,e without touching the reused leaves 0,1.
-    const c: chunk = [_]u8{0xC3} ** 32;
-    const d: chunk = [_]u8{0xD4} ** 32;
-    const e: chunk = [_]u8{0xE5} ** 32;
+    const c: chunk = @splat(0xC3);
+    const d: chunk = @splat(0xD4);
+    const e: chunk = @splat(0xE5);
     cache.leafPtr(2).* = c;
     cache.markDirty(2);
     cache.leafPtr(3).* = d;

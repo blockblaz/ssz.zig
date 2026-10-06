@@ -8,7 +8,7 @@ pub fn buildHashesOfZero(comptime HashType: type, comptime digest_length: usize,
     @setEvalBranchQuota(10000000);
     var ret: [depth][digest_length]u8 = undefined;
 
-    var current = [_]u8{0} ** digest_length;
+    var current: [digest_length]u8 = @splat(0);
 
     ret[0] = current;
 

@@ -22,8 +22,8 @@ const Validator = struct {
 
 test "Validator struct serialization" {
     const validator = Validator{
-        .pubkey = [_]u8{0xAA} ** 48,
-        .withdrawal_credentials = [_]u8{0xBB} ** 32,
+        .pubkey = @splat(0xAA),
+        .withdrawal_credentials = @splat(0xBB),
         .effective_balance = 32000000000,
         .slashed = false,
         .activation_eligibility_epoch = 0,
@@ -55,8 +55,8 @@ test "Validator struct serialization" {
 
 test "Validator struct hash tree root" {
     const validator = Validator{
-        .pubkey = [_]u8{0x01} ** 48,
-        .withdrawal_credentials = [_]u8{0x02} ** 32,
+        .pubkey = @splat(0x01),
+        .withdrawal_credentials = @splat(0x02),
         .effective_balance = 32000000000,
         .slashed = true,
         .activation_eligibility_epoch = 1,
@@ -79,8 +79,8 @@ test "Validator struct hash tree root" {
 
     // Different validator should produce different hash
     const validator2 = Validator{
-        .pubkey = [_]u8{0xFF} ** 48,
-        .withdrawal_credentials = [_]u8{0x02} ** 32,
+        .pubkey = @splat(0xFF),
+        .withdrawal_credentials = @splat(0x02),
         .effective_balance = 32000000000,
         .slashed = true,
         .activation_eligibility_epoch = 1,
@@ -97,8 +97,8 @@ test "Validator struct hash tree root" {
 test "Individual Validator serialization and hash" {
     // Test individual validator
     const validator = Validator{
-        .pubkey = [_]u8{0x01} ** 48,
-        .withdrawal_credentials = [_]u8{0x02} ** 32,
+        .pubkey = @splat(0x01),
+        .withdrawal_credentials = @splat(0x02),
         .effective_balance = 32000000000,
         .slashed = true,
         .activation_eligibility_epoch = 1,
@@ -134,8 +134,8 @@ test "List[Validator] serialization and hash tree root" {
 
     // Add test validators
     const validator1 = Validator{
-        .pubkey = [_]u8{0x01} ** 48,
-        .withdrawal_credentials = [_]u8{0x11} ** 32,
+        .pubkey = @splat(0x01),
+        .withdrawal_credentials = @splat(0x11),
         .effective_balance = 32000000000,
         .slashed = false,
         .activation_eligibility_epoch = 0,
@@ -145,8 +145,8 @@ test "List[Validator] serialization and hash tree root" {
     };
 
     const validator2 = Validator{
-        .pubkey = [_]u8{0x02} ** 48,
-        .withdrawal_credentials = [_]u8{0x22} ** 32,
+        .pubkey = @splat(0x02),
+        .withdrawal_credentials = @splat(0x22),
         .effective_balance = 31000000000,
         .slashed = false,
         .activation_eligibility_epoch = 1,
@@ -215,8 +215,8 @@ const BeamBlockBody = struct {
 test "BeamBlockBody with validator array - full cycle" {
     // Create test validators
     const validator1 = Validator{
-        .pubkey = [_]u8{0x01} ** 48,
-        .withdrawal_credentials = [_]u8{0x11} ** 32,
+        .pubkey = @splat(0x01),
+        .withdrawal_credentials = @splat(0x11),
         .effective_balance = 32000000000,
         .slashed = false,
         .activation_eligibility_epoch = 0,
@@ -226,8 +226,8 @@ test "BeamBlockBody with validator array - full cycle" {
     };
 
     const validator2 = Validator{
-        .pubkey = [_]u8{0x02} ** 48,
-        .withdrawal_credentials = [_]u8{0x22} ** 32,
+        .pubkey = @splat(0x02),
+        .withdrawal_credentials = @splat(0x22),
         .effective_balance = 31000000000,
         .slashed = true,
         .activation_eligibility_epoch = 1,
@@ -338,15 +338,15 @@ test "Zeam-style List/Bitlist usage with tree root stability" {
     try votes.append(Mini3SFVote{
         .validator_id = 1,
         .slot = 10,
-        .head = Mini3SFCheckpoint{ .root = [_]u8{1} ** 32, .slot = 10 },
-        .target = Mini3SFCheckpoint{ .root = [_]u8{2} ** 32, .slot = 9 },
-        .source = Mini3SFCheckpoint{ .root = [_]u8{3} ** 32, .slot = 8 },
+        .head = Mini3SFCheckpoint{ .root = @splat(1), .slot = 10 },
+        .target = Mini3SFCheckpoint{ .root = @splat(2), .slot = 9 },
+        .source = Mini3SFCheckpoint{ .root = @splat(3), .slot = 8 },
     });
 
     var hashes = try HistoricalBlockHashes.init(std.testing.allocator);
     defer hashes.deinit();
-    try hashes.append([_]u8{0xaa} ** 32);
-    try hashes.append([_]u8{0xbb} ** 32);
+    try hashes.append(@splat(0xaa));
+    try hashes.append(@splat(0xbb));
 
     var bitlist = try JustifiedSlots.init(std.testing.allocator);
     defer bitlist.deinit();
@@ -419,27 +419,27 @@ test "BeamState with historical roots - comprehensive test" {
     var historical_roots = try utils.List(Root, MAX_HISTORICAL_ROOTS).init(std.testing.allocator);
     defer historical_roots.deinit();
 
-    try historical_roots.append([_]u8{0x01} ** 32);
-    try historical_roots.append([_]u8{0x02} ** 32);
-    try historical_roots.append([_]u8{0x03} ** 32);
-    try historical_roots.append([_]u8{0xAA} ** 32);
-    try historical_roots.append([_]u8{0xBB} ** 32);
-    try historical_roots.append([_]u8{0xCC} ** 32);
-    try historical_roots.append([_]u8{0xDD} ** 32);
-    try historical_roots.append([_]u8{0xEE} ** 32);
-    try historical_roots.append([_]u8{0xFF} ** 32);
-    try historical_roots.append([_]u8{0x00} ** 32);
+    try historical_roots.append(@splat(0x01));
+    try historical_roots.append(@splat(0x02));
+    try historical_roots.append(@splat(0x03));
+    try historical_roots.append(@splat(0xAA));
+    try historical_roots.append(@splat(0xBB));
+    try historical_roots.append(@splat(0xCC));
+    try historical_roots.append(@splat(0xDD));
+    try historical_roots.append(@splat(0xEE));
+    try historical_roots.append(@splat(0xFF));
+    try historical_roots.append(@splat(0x00));
 
     // Create BeamState instance
     const beam_state = BeamState{
         .slot = 12345,
         .proposer_index = 42,
-        .parent_root = [_]u8{0x11} ** 32,
-        .state_root = [_]u8{0x22} ** 32,
+        .parent_root = @splat(0x11),
+        .state_root = @splat(0x22),
         .historical_roots = historical_roots,
         .validator_count = 1000,
-        .justified_checkpoint_root = [_]u8{0x33} ** 32,
-        .finalized_checkpoint_root = [_]u8{0x44} ** 32,
+        .justified_checkpoint_root = @splat(0x33),
+        .finalized_checkpoint_root = @splat(0x44),
     };
 
     // Test serialization
@@ -641,16 +641,16 @@ test "BeamState historical roots access and comparison" {
 
     // Add roots with specific patterns
     const test_patterns = [_][32]u8{
-        [_]u8{0x00} ** 32,
-        [_]u8{0xFF} ** 32,
-        [_]u8{0xAA} ** 32,
-        [_]u8{0x55} ** 32,
-        [_]u8{0x12} ** 32,
-        [_]u8{0x34} ** 32,
-        [_]u8{0x56} ** 32,
-        [_]u8{0x78} ** 32,
-        [_]u8{0x9A} ** 32,
-        [_]u8{0xBC} ** 32,
+        @splat(0x00),
+        @splat(0xFF),
+        @splat(0xAA),
+        @splat(0x55),
+        @splat(0x12),
+        @splat(0x34),
+        @splat(0x56),
+        @splat(0x78),
+        @splat(0x9A),
+        @splat(0xBC),
     };
 
     for (test_patterns) |pattern| {

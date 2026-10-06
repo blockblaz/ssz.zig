@@ -3099,7 +3099,7 @@ test "ProgressiveList of composite items tree root matches the EIP-7916 referenc
     for (cases) |c| {
         var list = try PList.init(std.testing.allocator);
         defer list.deinit();
-        for (0..c.n) |i| try list.append([_]u8{@truncate(i + 1)} ** 32);
+        for (0..c.n) |i| try list.append(@as([32]u8, @splat(@truncate(i + 1))));
 
         var root: [32]u8 = undefined;
         try hashTreeRoot(Sha256, PList, list, &root, std.testing.allocator);
@@ -3352,7 +3352,7 @@ test "ProgressiveBitlist rejects malformed encodings but not long ones" {
     try expectError(error.BitlistTrailingByteZero, PBits.validateBitlist(&[_]u8{ 0xff, 0x00 }));
 
     // A payload that Bitlist(16) rejects on length grounds is fine here.
-    const long = [_]u8{0xff} ** 64;
+    const long: [64]u8 = @splat(0xff);
     try expectError(error.BitlistTooManyBytes, utils.Bitlist(16).validateBitlist(&long));
     try PBits.validateBitlist(&long);
 }
@@ -3392,7 +3392,7 @@ test "ProgressiveContainer tree root matches the reference" {
     try serialize(Plain, Plain{ .a = 7, .b = @splat(0x11), .c = c }, &plain_buf, std.testing.allocator);
     try expect(std.mem.eql(u8, pc_buf.items, plain_buf.items));
 
-    try expectBytesHex("070000000000000011111111111111111111111111111111111111111111111111111111111111112c000000" ++ "aa" ** 40, pc_buf.items);
+    try expectBytesHex("070000000000000011111111111111111111111111111111111111111111111111111111111111112c000000" ++ @as([80]u8, @splat('a')), pc_buf.items);
 }
 
 test "ProgressiveContainer with one and nineteen fields" {
@@ -3429,8 +3429,8 @@ test "ProgressiveContainer with one and nineteen fields" {
         f18: u64,
     };
     var v19: PC19 = undefined;
-    inline for (@typeInfo(PC19).@"struct".fields, 0..) |f, i| {
-        @field(v19, f.name) = i + 1;
+    inline for (@typeInfo(PC19).@"struct".field_names, 0..) |name, i| {
+        @field(v19, name) = i + 1;
     }
     try hashTreeRoot(Sha256, PC19, v19, &root, std.testing.allocator);
     try expectRootHex("c6de7b2d3af2d92e3136b2228b93460506fab2907e467eff356c1dae7944d47b", &root);
@@ -3479,7 +3479,7 @@ test "ProgressiveContainer of ProgressiveLists matches the reference" {
 
     var deser: PC5 = undefined;
     try deserialize(PC5, buf.items, &deser, std.testing.allocator);
-    defer inline for (@typeInfo(PC5).@"struct".fields) |f| @field(deser, f.name).deinit();
+    defer inline for (@typeInfo(PC5).@"struct".field_names) |name| @field(deser, name).deinit();
     var deser_root: [32]u8 = undefined;
     try hashTreeRoot(Sha256, PC5, deser, &deser_root, std.testing.allocator);
     try expect(std.mem.eql(u8, &root, &deser_root));

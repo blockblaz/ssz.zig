@@ -956,7 +956,7 @@ test "merkleizeProgressive of an empty slice is the zero chunk" {
 
 test "merkleizeProgressive subtree layout" {
     var chunks: [5]chunk = undefined;
-    for (0..5) |i| chunks[i] = [_]u8{@intCast(i + 1)} ** 32;
+    for (0..5) |i| chunks[i] = @splat(@intCast(i + 1));
 
     var got: [32]u8 = undefined;
     var expected: [32]u8 = undefined;
@@ -986,7 +986,7 @@ test "merkleizeProgressive subtree layout" {
 }
 
 test "merkleizeProgressive is sensitive to trailing zero chunks" {
-    var chunks = [_]chunk{ [_]u8{0xAA} ** 32, zero_chunk };
+    var chunks = [_]chunk{ @splat(0xAA), zero_chunk };
     var one: [32]u8 = undefined;
     var two: [32]u8 = undefined;
     try merkleizeProgressive(Sha256, chunks[0..1], 1, &one);
@@ -1100,7 +1100,7 @@ pub fn hashTreeRoot(Hasher: type, T: type, value: T, out: *[Hasher.digest_length
             }
             if (comptime isProgressiveContainer(T)) {
                 try merkleizeProgressive(Hasher, chunks.items, 1, &tmp);
-                mixInActiveFields(Hasher, tmp, comptime activeFieldsChunk(str.fields.len), out);
+                mixInActiveFields(Hasher, tmp, comptime activeFieldsChunk(str.field_names.len), out);
             } else {
                 try merkleize(Hasher, chunks.items, null, out);
             }
